@@ -319,7 +319,7 @@ fun WonderlandApp(
             writableCalendars = state.deviceCalendars.filter { it.isWritable },
             defaultCalendarId = viewModel.lastPushCalendarId(),
             onDismiss = { showTaskDialog = false },
-            onSave = { task, pushCalId ->
+            onSave = { task, targetDates, pushCalId ->
                 val bldgName = task.buildingId?.let { state.buildingsById[it]?.name } ?: ""
                 val empName = task.assignedEmployeeId?.let { state.contactsById[it]?.fullName }
                 val custName = task.customerId?.let { state.contactsById[it]?.fullName }
@@ -328,7 +328,7 @@ fun WonderlandApp(
                     custName?.let { "Customer: $it" },
                     "Priority: ${task.priority.displayLabel}"
                 ).joinToString(" | ")
-                viewModel.saveTask(task, pushCalId, bldgName, extraDetails)
+                viewModel.saveTasksForDates(task, targetDates, pushCalId, bldgName, extraDetails)
             },
             onDelete = viewModel::deleteTask
         )
@@ -341,7 +341,9 @@ fun WonderlandApp(
             buildings = state.buildings,
             employees = state.employees,
             onDismiss = { showShiftDialog = false },
-            onSave = viewModel::saveShift,
+            onSave = { shift, targetDates ->
+                viewModel.saveShiftsForDates(shift, targetDates)
+            },
             onDelete = viewModel::deleteShift
         )
     }

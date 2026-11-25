@@ -176,6 +176,21 @@ class WonderlandViewModel(
         }
     }
 
+    fun saveTasksForDates(
+        template: TaskEntity,
+        dates: List<LocalDate>,
+        pushToCalendarId: Long? = null,
+        buildingName: String = "",
+        extraDetails: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.saveTasksForDates(template, dates, pushToCalendarId, buildingName, extraDetails)
+            if (pushToCalendarId != null || template.linkedCalendarEventId != null) {
+                repository.refreshGoogleCalendars(_selectedDate.value)
+            }
+        }
+    }
+
     fun cycleTaskStatus(task: TaskEntity) {
         viewModelScope.launch { repository.saveTask(task.copy(status = task.status.next())) }
     }
@@ -191,6 +206,10 @@ class WonderlandViewModel(
 
     fun saveShift(shift: ShiftScheduleEntity) {
         viewModelScope.launch { repository.saveShift(shift) }
+    }
+
+    fun saveShiftsForDates(template: ShiftScheduleEntity, dates: List<LocalDate>) {
+        viewModelScope.launch { repository.saveShiftsForDates(template, dates) }
     }
 
     fun cycleShiftStatus(shift: ShiftScheduleEntity) {

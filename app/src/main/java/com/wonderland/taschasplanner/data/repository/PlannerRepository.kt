@@ -163,6 +163,24 @@ class PlannerRepository(
         }
     }
 
+    suspend fun saveTasksForDates(
+        template: TaskEntity,
+        dates: List<LocalDate>,
+        pushToCalendarId: Long? = null,
+        locationName: String = "",
+        extraDetails: String = ""
+    ) {
+        val uniqueDates = dates.distinct().sorted()
+        uniqueDates.forEachIndexed { idx, date ->
+            val taskForDay = template.copy(
+                id = if (idx == 0) template.id else 0L,
+                dueDateEpochDay = date.toEpochDay(),
+                linkedCalendarEventId = if (idx == 0) template.linkedCalendarEventId else null
+            )
+            saveTask(taskForDay, pushToCalendarId, locationName, extraDetails)
+        }
+    }
+
     suspend fun deleteTask(task: TaskEntity) {
         task.linkedCalendarEventId?.let { eventId ->
             googleCalendarRepository.deleteEvent(eventId)
@@ -176,6 +194,20 @@ class PlannerRepository(
         else {
             db.shiftScheduleDao().update(shift)
             shift.id
+        }
+    }
+
+    suspend fun saveShiftsForDates(
+        template: ShiftScheduleEntity,
+        dates: List<LocalDate>
+    ) {
+        val uniqueDates = dates.distinct().sorted()
+        uniqueDates.forEachIndexed { idx, date ->
+            val shiftForDay = template.copy(
+                id = if (idx == 0) template.id else 0L,
+                dateEpochDay = date.toEpochDay()
+            )
+            saveShift(shiftForDay)
         }
     }
 

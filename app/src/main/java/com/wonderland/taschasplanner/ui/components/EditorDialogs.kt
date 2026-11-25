@@ -53,8 +53,10 @@ import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.TaskPriority
 import com.wonderland.taschasplanner.data.local.TaskStatus
 import com.wonderland.taschasplanner.data.model.DeviceCalendar
+import com.wonderland.taschasplanner.data.model.ScheduleDateExpander
 import com.wonderland.taschasplanner.data.model.WonderlandTimeFormat
 import com.wonderland.taschasplanner.ui.theme.BuildingAccentColors
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 @Composable
@@ -67,7 +69,7 @@ fun TaskEditorDialog(
     writableCalendars: List<DeviceCalendar>,
     defaultCalendarId: Long?,
     onDismiss: () -> Unit,
-    onSave: (TaskEntity, Long?) -> Unit,
+    onSave: (TaskEntity, List<LocalDate>, Long?) -> Unit,
     onDelete: ((TaskEntity) -> Unit)? = null
 ) {
     var title by remember { mutableStateOf(initial?.title ?: "") }
@@ -77,6 +79,8 @@ fun TaskEditorDialog(
     var selectedCustomerId by remember { mutableStateOf(initial?.customerId) }
     var selectedBuildingId by remember { mutableStateOf(initial?.buildingId ?: buildings.firstOrNull()?.id) }
     var dateEpochDay by remember { mutableLongStateOf(initial?.dueDateEpochDay ?: defaultDate.toEpochDay()) }
+    var selectedWeekdays by remember { mutableStateOf(setOf(LocalDate.ofEpochDay(dateEpochDay).dayOfWeek)) }
+    var repeatWeeks by remember { mutableIntStateOf(1) }
     var isTimed by remember { mutableStateOf(initial == null || initial.startTimeMinutes != null) }
     var startMinutes by remember { mutableIntStateOf(initial?.startTimeMinutes ?: (9 * 60)) }
     var durationMinutes by remember {
@@ -137,10 +141,28 @@ fun TaskEditorDialog(
 
                 // Date stepper
                 DateStepperRow(
-                    label = "Due Date",
+                    label = if (initial == null) "Start Date" else "Due Date",
                     date = LocalDate.ofEpochDay(dateEpochDay),
-                    onDateChange = { dateEpochDay = it.toEpochDay() }
+                    onDateChange = { newDate ->
+                        val oldDow = LocalDate.ofEpochDay(dateEpochDay).dayOfWeek
+                        dateEpochDay = newDate.toEpochDay()
+                        if (selectedWeekdays == setOf(oldDow)) {
+                            selectedWeekdays = setOf(newDate.dayOfWeek)
+                        }
+                    }
                 )
+
+                // Multi-day & multi-week picker when creating a new task
+                if (initial == null) {
+                    MultiWeekDayPicker(
+                        startDate = LocalDate.ofEpochDay(dateEpochDay),
+                        selectedDays = selectedWeekdays,
+                        weeksCount = repeatWeeks,
+                        itemNoun = "task",
+                        onSelectedDaysChange = { selectedWeekdays = it },
+                        onWeeksCountChange = { repeatWeeks = it }
+                    )
+                }
 
                 // Timed toggle & time stepper
                 Row(
@@ -358,11 +380,27 @@ fun TaskEditorDialog(
                         recurrence = recurrence,
                         linkedCalendarEventId = initial?.linkedCalendarEventId
                     )
-                    onSave(entity, if (pushToCalendar) selectedCalendarId else null)
+                    val targetDates = if (initial == null) {
+                        ScheduleDateExpander.expandDates(
+                            startDate = LocalDate.ofEpochDay(dateEpochDay),
+                            selectedDays = selectedWeekdays,
+                            weeksCount = repeatWeeks
+                        )
+                    } else {
+                        listOf(LocalDate.ofEpochDay(dateEpochDay))
+                    }
+                    onSave(entity, targetDates, if (pushToCalendar) selectedCalendarId else null)
                     onDismiss()
                 }
             ) {
-                Text("Save Task")
+                val count = if (initial == null) {
+                    ScheduleDateExpander.expandDates(
+                        LocalDate.ofEpochDay(dateEpochDay),
+                        selectedWeekdays,
+                        repeatWeeks
+                    ).size
+                } else 1
+                Text(if (count > 1) "Save $count Tasks" else "Save Task")
             }
         },
         dismissButton = {
@@ -378,12 +416,14 @@ fun ShiftEditorDialog(
     buildings: List<BuildingEntity>,
     employees: List<ContactEntity>,
     onDismiss: () -> Unit,
-    onSave: (ShiftScheduleEntity) -> Unit,
+    onSave: (ShiftScheduleEntity, List<LocalDate>) -> Unit,
     onDelete: ((ShiftScheduleEntity) -> Unit)? = null
 ) {
     var selectedEmployeeId by remember { mutableStateOf(initial?.employeeId ?: employees.firstOrNull()?.id) }
     var selectedBuildingId by remember { mutableStateOf(initial?.buildingId ?: buildings.firstOrNull()?.id) }
     var dateEpochDay by remember { mutableLongStateOf(initial?.dateEpochDay ?: defaultDate.toEpochDay()) }
+    var selectedWeekdays by remember { mutableStateOf(setOf(LocalDate.ofEpochDay(dateEpochDay).dayOfWeek)) }
+    var repeatWeeks by remember { mutableIntStateOf(1) }
     var isFlexibleHours by remember { mutableStateOf(initial?.isFlexibleHours ?: false) }
     var allocatedHours by remember {
         mutableStateOf(
@@ -456,10 +496,27 @@ fun ShiftEditorDialog(
                     }
 
                     DateStepperRow(
-                        label = "Shift Date",
+                        label = if (initial == null) "Start Date" else "Shift Date",
                         date = LocalDate.ofEpochDay(dateEpochDay),
-                        onDateChange = { dateEpochDay = it.toEpochDay() }
+                        onDateChange = { newDate ->
+                            val oldDow = LocalDate.ofEpochDay(dateEpochDay).dayOfWeek
+                            dateEpochDay = newDate.toEpochDay()
+                            if (selectedWeekdays == setOf(oldDow)) {
+                                selectedWeekdays = setOf(newDate.dayOfWeek)
+                            }
+                        }
                     )
+
+                    if (initial == null) {
+                        MultiWeekDayPicker(
+                            startDate = LocalDate.ofEpochDay(dateEpochDay),
+                            selectedDays = selectedWeekdays,
+                            weeksCount = repeatWeeks,
+                            itemNoun = "shift",
+                            onSelectedDaysChange = { selectedWeekdays = it },
+                            onWeeksCountChange = { repeatWeeks = it }
+                        )
+                    }
 
                     Text("Schedule Type", style = MaterialTheme.typography.labelLarge)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -565,6 +622,15 @@ fun ShiftEditorDialog(
                 onClick = {
                     val empId = selectedEmployeeId ?: return@TextButton
                     val bldgId = selectedBuildingId ?: return@TextButton
+                    val targetDates = if (initial == null) {
+                        ScheduleDateExpander.expandDates(
+                            startDate = LocalDate.ofEpochDay(dateEpochDay),
+                            selectedDays = selectedWeekdays,
+                            weeksCount = repeatWeeks
+                        )
+                    } else {
+                        listOf(LocalDate.ofEpochDay(dateEpochDay))
+                    }
                     onSave(
                         ShiftScheduleEntity(
                             id = initial?.id ?: 0L,
@@ -578,11 +644,21 @@ fun ShiftEditorDialog(
                             stationOrRole = station.trim(),
                             status = status,
                             notes = notes.trim()
-                        )
+                        ),
+                        targetDates
                     )
                     onDismiss()
                 }
-            ) { Text("Save Shift") }
+            ) {
+                val count = if (initial == null) {
+                    ScheduleDateExpander.expandDates(
+                        LocalDate.ofEpochDay(dateEpochDay),
+                        selectedWeekdays,
+                        repeatWeeks
+                    ).size
+                } else 1
+                Text(if (count > 1) "Save $count Shifts" else "Save Shift")
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -857,6 +933,117 @@ fun ContactEditorDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+private fun MultiWeekDayPicker(
+    startDate: LocalDate,
+    selectedDays: Set<DayOfWeek>,
+    weeksCount: Int,
+    itemNoun: String,
+    onSelectedDaysChange: (Set<DayOfWeek>) -> Unit,
+    onWeeksCountChange: (Int) -> Unit
+) {
+    val weekdaysOrder = listOf(
+        DayOfWeek.MONDAY to "Mon",
+        DayOfWeek.TUESDAY to "Tue",
+        DayOfWeek.WEDNESDAY to "Wed",
+        DayOfWeek.THURSDAY to "Thu",
+        DayOfWeek.FRIDAY to "Fri",
+        DayOfWeek.SATURDAY to "Sat",
+        DayOfWeek.SUNDAY to "Sun"
+    )
+    val monToFri = setOf(
+        DayOfWeek.MONDAY,
+        DayOfWeek.TUESDAY,
+        DayOfWeek.WEDNESDAY,
+        DayOfWeek.THURSDAY,
+        DayOfWeek.FRIDAY
+    )
+    val previewCount = ScheduleDateExpander.expandDates(startDate, selectedDays, weeksCount).size
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Days of Week", style = MaterialTheme.typography.labelLarge)
+            TextButton(
+                onClick = {
+                    onSelectedDaysChange(
+                        if (selectedDays == monToFri) setOf(startDate.dayOfWeek) else monToFri
+                    )
+                }
+            ) {
+                Text(if (selectedDays == monToFri) "Single Day" else "Weekdays (M–F)")
+            }
+        }
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            weekdaysOrder.forEach { (dow, label) ->
+                val isSelected = dow in selectedDays
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        val next = if (isSelected) {
+                            if (selectedDays.size > 1) selectedDays - dow else selectedDays
+                        } else {
+                            selectedDays + dow
+                        }
+                        onSelectedDaysChange(next)
+                    },
+                    label = { Text(label) }
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Repeat Across Weeks", style = MaterialTheme.typography.labelLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onWeeksCountChange((weeksCount - 1).coerceAtLeast(1)) }) {
+                    Icon(Icons.Outlined.ChevronLeft, contentDescription = "Fewer weeks")
+                }
+                Text(
+                    if (weeksCount == 1) "1 wk" else "$weeksCount wks",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                IconButton(onClick = { onWeeksCountChange((weeksCount + 1).coerceAtMost(12)) }) {
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = "More weeks")
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(1, 2, 4, 6, 8).forEach { wk ->
+                FilterChip(
+                    selected = weeksCount == wk,
+                    onClick = { onWeeksCountChange(wk) },
+                    label = { Text(if (wk == 1) "1 wk" else "$wk wks") }
+                )
+            }
+        }
+
+        Text(
+            text = if (previewCount == 1) {
+                "Will schedule 1 $itemNoun on ${WonderlandTimeFormat.formatShortDate(startDate)}"
+            } else {
+                "Will schedule $previewCount ${itemNoun}s across $weeksCount ${if (weeksCount == 1) "week" else "weeks"} keeping your selected times/hours"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
 
 @Composable

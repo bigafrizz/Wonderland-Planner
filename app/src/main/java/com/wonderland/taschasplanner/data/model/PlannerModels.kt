@@ -5,6 +5,7 @@ import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.TaskPriority
 import com.wonderland.taschasplanner.data.local.TaskStatus
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -284,4 +285,24 @@ object WonderlandTimeFormat {
     fun formatShortDate(date: LocalDate): String = date.format(dateFormatter)
     fun formatFullDate(date: LocalDate): String = date.format(fullDateFormatter)
     fun formatMonthYear(date: LocalDate): String = date.format(monthYearFormatter)
+}
+
+object ScheduleDateExpander {
+    /**
+     * Expands [startDate] across [weeksCount] rolling 7-day weeks, keeping every date whose
+     * DayOfWeek is in [selectedDays]. Each selected weekday appears exactly [weeksCount] times.
+     */
+    fun expandDates(
+        startDate: LocalDate,
+        selectedDays: Set<DayOfWeek>,
+        weeksCount: Int
+    ): List<LocalDate> {
+        val safeWeeks = weeksCount.coerceIn(1, 12)
+        if (selectedDays.isEmpty()) return listOf(startDate)
+        val totalDays = safeWeeks * 7L
+        val results = (0L until totalDays)
+            .map { startDate.plusDays(it) }
+            .filter { it.dayOfWeek in selectedDays }
+        return results.ifEmpty { listOf(startDate) }
+    }
 }

@@ -149,4 +149,34 @@ class PlannerAggregatorTest {
         assertEquals(1, unified.size)
         assertEquals(PlannerItemSource.TASK, unified.first().source)
     }
+
+    @Test
+    fun expandsMultiDayMultiWeekScheduleDatesAccurately() {
+        // 2026-11-25 is a Wednesday
+        val dates = com.wonderland.taschasplanner.data.model.ScheduleDateExpander.expandDates(
+            startDate = today,
+            selectedDays = setOf(
+                java.time.DayOfWeek.MONDAY,
+                java.time.DayOfWeek.WEDNESDAY,
+                java.time.DayOfWeek.FRIDAY
+            ),
+            weeksCount = 2
+        )
+        assertEquals(6, dates.size)
+        assertEquals(LocalDate.of(2026, 11, 25), dates.first())
+        assertEquals(LocalDate.of(2026, 12, 7), dates.last())
+
+        val weekdaysFourWeeks = com.wonderland.taschasplanner.data.model.ScheduleDateExpander.expandDates(
+            startDate = today,
+            selectedDays = setOf(
+                java.time.DayOfWeek.MONDAY,
+                java.time.DayOfWeek.TUESDAY,
+                java.time.DayOfWeek.WEDNESDAY,
+                java.time.DayOfWeek.THURSDAY,
+                java.time.DayOfWeek.FRIDAY
+            ),
+            weeksCount = 4
+        )
+        assertEquals(20, weekdaysFourWeeks.size)
+    }
 }

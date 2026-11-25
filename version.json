@@ -1,6 +1,6 @@
 {
-  "versionCode": 2,
-  "versionName": "1.1.0",
-  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.1.0/taschas-planner-v1.1.0.apk",
-  "releaseNotes": "Added two-way Google Calendar task sync, Flexible-Hours scheduling (0.5h increments + daily hours tracker), JSON Backup/Restore, and In-App Updates."
+  "versionCode": 3,
+  "versionName": "1.2.0",
+  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.2.0/taschas-planner-v1.2.0.apk",
+  "releaseNotes": "Added multi-day (Mon–Sun) & multi-week scheduling for tasks and shifts, plus two-way sync to specific Google Calendars."
 }
