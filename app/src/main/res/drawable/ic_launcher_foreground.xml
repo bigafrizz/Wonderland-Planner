@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Cheshire Cat Glowing Eyes -->
+    <path
+        android:fillColor="#F2C94C"
+        android:pathData="M34,42 C38,36 46,36 48,42 C46,47 38,47 34,42 Z" />
+    <path
+        android:fillColor="#130D1E"
+        android:pathData="M41,38 C42.5,38 43,40 43,42 C43,44 42.5,46 41,46 C39.5,46 39,44 39,42 C39,40 39.5,38 41,38 Z" />
+    <path
+        android:fillColor="#F2C94C"
+        android:pathData="M60,42 C62,36 70,36 74,42 C70,47 62,47 60,42 Z" />
+    <path
+        android:fillColor="#130D1E"
+        android:pathData="M67,38 C68.5,38 69,40 69,42 C69,44 68.5,46 67,46 C65.5,46 65,44 65,42 C65,40 65.5,38 67,38 Z" />
+    <!-- Iconic Cheshire Grin -->
+    <path
+        android:fillColor="#FFFDF8"
+        android:strokeColor="#FF4DA6"
+        android:strokeWidth="2.5"
+        android:pathData="M24,56 C32,74 76,74 84,56 C74,64 34,64 24,56 Z" />
+    <!-- Teeth vertical dividers -->
+    <path
+        android:strokeColor="#4A148C"
+        android:strokeWidth="1.5"
+        android:pathData="M38,60 L38,67 M46,62 L46,69 M54,62 L54,70 M62,62 L62,69 M70,60 L70,67" />
+</vector>

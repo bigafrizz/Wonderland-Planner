@@ -1,0 +1,20 @@
+# Gradle & Android build outputs
+.gradle/
+build/
+app/build/
+captures/
+*.apk
+*.ap_
+*.aab
+
+# Local environment & signing secrets (never commit!)
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# IDE files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
