@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactEntity::class,
         TaskEntity::class,
         ShiftScheduleEntity::class,
-        CalendarPrefEntity::class
+        CalendarPrefEntity::class,
+        CompTimeEntryEntity::class
     ],
-    version = 2,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(WonderlandTypeConverters::class)
@@ -26,15 +27,12 @@ abstract class WonderlandDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun shiftScheduleDao(): ShiftScheduleDao
     abstract fun calendarPrefDao(): CalendarPrefDao
+    abstract fun compTimeDao(): CompTimeDao
 
     companion object {
         @Volatile
         private var INSTANCE: WonderlandDatabase? = null
 
-        /**
-         * Non-destructive migration from v1 to v2 adding Flexible-Hours shift columns.
-         * Preserves 100% of existing buildings, contacts, tasks, and timed shifts.
-         */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -46,6 +44,36 @@ abstract class WonderlandDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `comp_time_entries` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `dateEpochDay` INTEGER NOT NULL,
+                        `entryType` TEXT NOT NULL,
+                        `timeInMinutes` INTEGER,
+                        `timeOutMinutes` INTEGER,
+                        `breakMinutes` INTEGER NOT NULL,
+                        `usedCompHours` REAL NOT NULL,
+                        `notes` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_comp_time_entries_dateEpochDay` ON `comp_time_entries` (`dateEpochDay`)"
+                )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE contacts ADD COLUMN birthdayMonth INTEGER")
+                db.execSQL("ALTER TABLE contacts ADD COLUMN birthdayDay INTEGER")
+                db.execSQL("ALTER TABLE contacts ADD COLUMN linkedBirthdayEventId INTEGER")
+            }
+        }
+
         fun getInstance(context: Context): WonderlandDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -53,7 +81,7 @@ abstract class WonderlandDatabase : RoomDatabase() {
                     WonderlandDatabase::class.java,
                     "wonderland_planner.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }
             }

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.wonderland.taschasplanner.data.backup.WonderlandBackupManager
 import com.wonderland.taschasplanner.data.local.BuildingEntity
 import com.wonderland.taschasplanner.data.local.CalendarPrefEntity
+import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
@@ -13,7 +14,6 @@ import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.ThemeMode
 import com.wonderland.taschasplanner.data.model.CalendarEvent
 import com.wonderland.taschasplanner.data.model.DeviceCalendar
-import com.wonderland.taschasplanner.data.model.ShiftConflictDetector
 import com.wonderland.taschasplanner.data.repository.PlannerRepository
 import com.wonderland.taschasplanner.data.update.AppUpdateManager
 import com.wonderland.taschasplanner.data.update.RemoteAppVersion
@@ -38,8 +38,7 @@ data class WonderlandUiState(
     val calendarEvents: List<CalendarEvent> = emptyList(),
     val hasCalendarPermission: Boolean = false,
     val showSampleCalendarPreview: Boolean = true,
-    val selectedDate: LocalDate = LocalDate.now(),
-    val conflictingShiftIds: Set<Long> = emptySet()
+    val selectedDate: LocalDate = LocalDate.now()
 ) {
     val employees: List<ContactEntity> get() = contacts.filter { it.type == ContactType.EMPLOYEE }
     val customers: List<ContactEntity> get() = contacts.filter { it.type == ContactType.CUSTOMER }
@@ -65,6 +64,13 @@ class WonderlandViewModel(
 
     private val _backupStatusMessage = MutableStateFlow<String?>(null)
     val backupStatusMessage: StateFlow<String?> = _backupStatusMessage.asStateFlow()
+
+    val compTimeEntries: StateFlow<List<CompTimeEntryEntity>> = repository.compTimeEntries.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
+    val dailyBaselineHours: StateFlow<Double> = repository.dailyBaselineHours
 
     private val dataFlow = combine(
         repository.buildings,
@@ -102,8 +108,7 @@ class WonderlandViewModel(
             calendarEvents = meta.calendarEvents,
             hasCalendarPermission = meta.hasCalendarPermission,
             showSampleCalendarPreview = meta.showSampleCalendarPreview,
-            selectedDate = selectedDate,
-            conflictingShiftIds = ShiftConflictDetector.conflictingShiftIds(data.shifts)
+            selectedDate = selectedDate
         )
     }.stateIn(
         scope = viewModelScope,
@@ -148,12 +153,26 @@ class WonderlandViewModel(
         viewModelScope.launch { repository.deleteBuilding(building) }
     }
 
-    fun saveContact(contact: ContactEntity) {
-        viewModelScope.launch { repository.saveContact(contact) }
+    fun saveContact(
+        contact: ContactEntity,
+        pushBirthdayCalendarId: Long? = null,
+        buildingName: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.saveContact(contact, pushBirthdayCalendarId, buildingName)
+            if (pushBirthdayCalendarId != null || contact.linkedBirthdayEventId != null) {
+                repository.refreshGoogleCalendars(_selectedDate.value)
+            }
+        }
     }
 
     fun deleteContact(contact: ContactEntity) {
-        viewModelScope.launch { repository.deleteContact(contact) }
+        viewModelScope.launch {
+            repository.deleteContact(contact)
+            if (contact.linkedBirthdayEventId != null) {
+                repository.refreshGoogleCalendars(_selectedDate.value)
+            }
+        }
     }
 
     fun toggleFavoriteContact(contact: ContactEntity) {
@@ -234,6 +253,25 @@ class WonderlandViewModel(
     fun deleteShifts(shifts: List<ShiftScheduleEntity>) {
         if (shifts.isEmpty()) return
         viewModelScope.launch { repository.deleteShifts(shifts) }
+    }
+
+    // --- Comp Time ---
+    fun setDailyBaselineHours(hours: Double) = repository.setDailyBaselineHours(hours)
+
+    fun saveCompTimeEntry(entry: CompTimeEntryEntity) {
+        viewModelScope.launch { repository.saveCompTimeEntry(entry) }
+    }
+
+    fun deleteCompTimeEntry(entry: CompTimeEntryEntity) {
+        viewModelScope.launch { repository.deleteCompTimeEntry(entry) }
+    }
+
+    fun clockInOrOutToday() {
+        viewModelScope.launch {
+            val now = java.time.LocalTime.now()
+            val nowMinutes = now.hour * 60 + now.minute
+            repository.clockInOrOutToday(nowMinutes)
+        }
     }
 
     fun loadSampleData() {

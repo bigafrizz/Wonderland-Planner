@@ -196,4 +196,43 @@ class PlannerAggregatorTest {
         val matchedShifts = com.wonderland.taschasplanner.data.model.ScheduleBatchMatcher.matchingShifts(s1, listOf(s1, s2, otherShift))
         assertEquals(listOf(10L, 11L), matchedShifts.map { it.id })
     }
+
+    @Test
+    fun expandsYearlyEmployeeBirthdaysAndDeduplicatesSyncedCalendarEvent() {
+        val alice = com.wonderland.taschasplanner.data.local.ContactEntity(
+            id = 50L,
+            type = com.wonderland.taschasplanner.data.local.ContactType.EMPLOYEE,
+            fullName = "Alice Liddell",
+            buildingId = manor.id,
+            birthdayMonth = 2,
+            birthdayDay = 29,
+            linkedBirthdayEventId = 900L
+        )
+        val syncedBdayEvent = CalendarEvent(
+            id = 900L,
+            calendarId = 5L,
+            calendarName = "Work Cal",
+            title = "Alice's Birthday",
+            startMillis = LocalDate.of(2026, 2, 28).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+            endMillis = LocalDate.of(2026, 3, 1).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+            allDay = true
+        )
+
+        val unified = PlannerAggregator.buildUnifiedItems(
+            tasks = emptyList(),
+            shifts = emptyList(),
+            calendarEvents = listOf(syncedBdayEvent),
+            buildingsById = mapOf(manor.id to manor),
+            employeeNamesById = mapOf(50L to "Alice Liddell"),
+            visibleCalendarIds = setOf(5L),
+            contactsWithBirthdays = listOf(alice),
+            birthdayYears = listOf(2026, 2028),
+            zoneId = ZoneOffset.UTC
+        )
+
+        assertEquals(2, unified.size)
+        assertEquals(PlannerItemSource.BIRTHDAY, unified[0].source)
+        assertEquals(LocalDate.of(2026, 2, 28).toEpochDay(), unified[0].dateEpochDay)
+        assertEquals(LocalDate.of(2028, 2, 29).toEpochDay(), unified[1].dateEpochDay)
+    }
 }

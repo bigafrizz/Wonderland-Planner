@@ -33,6 +33,16 @@ class WonderlandBackupManagerTest {
                     allocatedHours = 4.5,
                     stationOrRole = "Flexible Restock"
                 )
+            ),
+            compTimeEntries = listOf(
+                com.wonderland.taschasplanner.data.local.CompTimeEntryEntity(
+                    id = 300L,
+                    dateEpochDay = 20000L,
+                    timeInMinutes = 8 * 60,
+                    timeOutMinutes = 17 * 60 + 30,
+                    breakMinutes = 30,
+                    notes = "Late event setup"
+                )
             )
         )
 
@@ -48,5 +58,7 @@ class WonderlandBackupManagerTest {
         assertEquals(1, decoded.shifts.size)
         assertTrue(decoded.shifts.first().isFlexibleHours)
         assertEquals(4.5, decoded.shifts.first().allocatedHours, 0.001)
+        assertEquals(1, decoded.compTimeEntries.size)
+        assertEquals("Late event setup", decoded.compTimeEntries.first().notes)
     }
 }

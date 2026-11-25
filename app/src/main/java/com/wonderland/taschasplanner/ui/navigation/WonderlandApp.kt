@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -45,6 +46,7 @@ import com.wonderland.taschasplanner.ui.components.BuildingEditorDialog
 import com.wonderland.taschasplanner.ui.components.ContactEditorDialog
 import com.wonderland.taschasplanner.ui.components.ShiftEditorDialog
 import com.wonderland.taschasplanner.ui.components.TaskEditorDialog
+import com.wonderland.taschasplanner.ui.comptime.CompTimeScreen
 import com.wonderland.taschasplanner.ui.contacts.ContactsScreen
 import com.wonderland.taschasplanner.ui.planner.PlannerScreen
 import com.wonderland.taschasplanner.ui.settings.SettingsScreen
@@ -55,6 +57,7 @@ enum class WonderlandDestination(val label: String, val icon: ImageVector) {
     TODAY("Today", Icons.Outlined.AutoAwesome),
     PLANNER("Planner", Icons.Outlined.CalendarMonth),
     BUILDINGS("Buildings", Icons.Outlined.Apartment),
+    COMP_TIME("Comp", Icons.Outlined.AccessTime),
     CONTACTS("Contacts", Icons.Outlined.Contacts),
     SETTINGS("Settings", Icons.Outlined.Settings)
 }
@@ -65,6 +68,8 @@ fun WonderlandApp(
     widthSizeClass: WindowWidthSizeClass
 ) {
     val state by viewModel.uiState.collectAsState()
+    val compTimeEntries by viewModel.compTimeEntries.collectAsState()
+    val dailyBaselineHours by viewModel.dailyBaselineHours.collectAsState()
     val updateManifestUrl by viewModel.updateManifestUrl.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
@@ -222,6 +227,15 @@ fun WonderlandApp(
                     onDeleteTasks = viewModel::deleteTasks
                 )
 
+                WonderlandDestination.COMP_TIME -> CompTimeScreen(
+                    entries = compTimeEntries,
+                    dailyBaselineHours = dailyBaselineHours,
+                    onSetBaselineHours = viewModel::setDailyBaselineHours,
+                    onClockInOrOutNow = viewModel::clockInOrOutToday,
+                    onSaveEntry = viewModel::saveCompTimeEntry,
+                    onDeleteEntry = viewModel::deleteCompTimeEntry
+                )
+
                 WonderlandDestination.CONTACTS -> ContactsScreen(
                     state = state,
                     isExpandedWidth = isExpanded,
@@ -375,8 +389,13 @@ fun WonderlandApp(
             initial = editingContact,
             defaultType = contactDefaultType,
             buildings = state.buildings,
+            writableCalendars = state.deviceCalendars.filter { it.isWritable },
+            defaultCalendarId = viewModel.lastPushCalendarId(),
             onDismiss = { showContactDialog = false },
-            onSave = viewModel::saveContact,
+            onSave = { contact, pushBdayCalId ->
+                val bldgName = contact.buildingId?.let { state.buildingsById[it]?.name } ?: ""
+                viewModel.saveContact(contact, pushBdayCalId, bldgName)
+            },
             onDelete = viewModel::deleteContact
         )
     }

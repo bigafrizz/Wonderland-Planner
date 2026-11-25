@@ -378,6 +378,14 @@ private fun ContactDetailPane(
             if (contact.email.isNotBlank()) {
                 Text("Email: ${contact.email}", style = MaterialTheme.typography.bodyMedium)
             }
+            if (contact.birthdayMonth != null && contact.birthdayDay != null) {
+                val syncedSuffix = if (contact.linkedBirthdayEventId != null) " • Synced to Google Cal" else ""
+                Text(
+                    text = "\uD83C\uDF82 Birthday: ${WonderlandTimeFormat.formatBirthday(contact.birthdayMonth, contact.birthdayDay)}$syncedSuffix",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
             if (contact.notes.isNotBlank()) {
                 Text("Notes: ${contact.notes}", style = MaterialTheme.typography.bodyMedium)
             }

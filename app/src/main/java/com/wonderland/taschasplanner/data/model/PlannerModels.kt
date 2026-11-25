@@ -1,6 +1,9 @@
 package com.wonderland.taschasplanner.data.model
 
 import com.wonderland.taschasplanner.data.local.BuildingEntity
+import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
+import com.wonderland.taschasplanner.data.local.CompTimeEntryType
+import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.TaskPriority
@@ -8,8 +11,11 @@ import com.wonderland.taschasplanner.data.local.TaskStatus
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.Month
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
 data class DeviceCalendar(
@@ -49,7 +55,7 @@ data class CalendarEvent(
     }
 }
 
-enum class PlannerItemSource { GOOGLE_CALENDAR, TASK, SHIFT }
+enum class PlannerItemSource { GOOGLE_CALENDAR, TASK, SHIFT, BIRTHDAY }
 
 data class UnifiedPlannerItem(
     val id: String,
@@ -69,40 +75,7 @@ data class UnifiedPlannerItem(
     val calendarEvent: CalendarEvent? = null
 )
 
-data class ShiftConflict(
-    val shiftA: ShiftScheduleEntity,
-    val shiftB: ShiftScheduleEntity
-)
-
 object ShiftConflictDetector {
-    /**
-     * Detects overlapping timed shifts for the same employee on the same date (especially across different buildings).
-     * Flexible-hours shifts (no fixed time in/out) do not trigger clock-overlap conflicts.
-     */
-    fun findConflicts(shifts: List<ShiftScheduleEntity>): List<ShiftConflict> {
-        val conflicts = mutableListOf<ShiftConflict>()
-        val grouped = shifts
-            .filter { !it.isFlexibleHours }
-            .groupBy { it.employeeId to it.dateEpochDay }
-        for ((_, employeeDayShifts) in grouped) {
-            val sorted = employeeDayShifts.sortedBy { it.startMinutes }
-            for (i in sorted.indices) {
-                for (j in i + 1 until sorted.size) {
-                    val a = sorted[i]
-                    val b = sorted[j]
-                    if (a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes) {
-                        conflicts.add(ShiftConflict(a, b))
-                    }
-                }
-            }
-        }
-        return conflicts
-    }
-
-    fun conflictingShiftIds(shifts: List<ShiftScheduleEntity>): Set<Long> {
-        return findConflicts(shifts).flatMap { listOf(it.shiftA.id, it.shiftB.id) }.toSet()
-    }
-
     /**
      * Sums total scheduled hours (both timed and flexible-hours shifts) per employee for a given day.
      */
@@ -127,13 +100,16 @@ object PlannerAggregator {
         visibleCalendarIds: Set<Long>?,
         buildingFilterId: Long? = null,
         employeeFilterId: Long? = null,
+        contactsWithBirthdays: List<ContactEntity> = emptyList(),
+        birthdayYears: List<Int> = listOf(LocalDate.now().year - 1, LocalDate.now().year, LocalDate.now().year + 1),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<UnifiedPlannerItem> {
         val items = mutableListOf<UnifiedPlannerItem>()
-        val linkedTaskEventIds = tasks.mapNotNull { it.linkedCalendarEventId }.toSet()
+        val linkedEventIds = tasks.mapNotNull { it.linkedCalendarEventId }.toSet() +
+            contactsWithBirthdays.mapNotNull { it.linkedBirthdayEventId }.toSet()
 
         calendarEvents
-            .filter { it.id !in linkedTaskEventIds }
+            .filter { it.id !in linkedEventIds }
             .filter { visibleCalendarIds == null || it.calendarId in visibleCalendarIds }
             .filter { buildingFilterId == null && employeeFilterId == null }
             .forEach { ev ->
@@ -214,6 +190,39 @@ object PlannerAggregator {
                 )
             }
 
+        contactsWithBirthdays
+            .filter { it.birthdayMonth != null && it.birthdayDay != null }
+            .filter { buildingFilterId == null || it.buildingId == buildingFilterId }
+            .filter { employeeFilterId == null || it.id == employeeFilterId }
+            .forEach { contact ->
+                val month = contact.birthdayMonth!!
+                val day = contact.birthdayDay!!
+                val bldg = contact.buildingId?.let { buildingsById[it] }
+                birthdayYears.distinct().forEach { yr ->
+                    val maxDay = YearMonth.of(yr, month).lengthOfMonth()
+                    val date = LocalDate.of(yr, month, day.coerceAtMost(maxDay))
+                    items.add(
+                        UnifiedPlannerItem(
+                            id = "bday_${contact.id}_$yr",
+                            source = PlannerItemSource.BIRTHDAY,
+                            title = "\uD83C\uDF82 ${contact.fullName}'s Birthday",
+                            subtitle = listOfNotNull(
+                                contact.roleOrCompany.takeIf { it.isNotBlank() },
+                                bldg?.name
+                            ).joinToString(" • ").ifBlank { "Yearly Birthday" },
+                            dateEpochDay = date.toEpochDay(),
+                            startMinutes = null,
+                            endMinutes = null,
+                            allDay = true,
+                            accentColorHex = 0xFFD81B60L,
+                            customTimeLabel = "Birthday • All Day",
+                            buildingId = contact.buildingId,
+                            employeeId = contact.id
+                        )
+                    )
+                }
+            }
+
         return items.sortedWith(
             compareBy<UnifiedPlannerItem> { it.dateEpochDay }
                 .thenBy { if (it.allDay) -1 else (it.startMinutes ?: 0) }
@@ -285,6 +294,12 @@ object WonderlandTimeFormat {
     fun formatShortDate(date: LocalDate): String = date.format(dateFormatter)
     fun formatFullDate(date: LocalDate): String = date.format(fullDateFormatter)
     fun formatMonthYear(date: LocalDate): String = date.format(monthYearFormatter)
+
+    fun formatBirthday(month: Int, day: Int): String {
+        val monthName = Month.of(month.coerceIn(1, 12))
+            .getDisplayName(TextStyle.FULL, Locale.getDefault())
+        return "$monthName $day"
+    }
 }
 
 object ScheduleDateExpander {
@@ -338,5 +353,68 @@ object ScheduleBatchMatcher {
                     other.startMinutes == target.startMinutes && other.endMinutes == target.endMinutes
                 }
         }
+    }
+}
+
+data class CompTimeSummary(
+    val netBalanceHours: Double,
+    val totalEarnedHours: Double,
+    val totalUsedHours: Double,
+    val weekWorkedHours: Double
+)
+
+object CompTimeCalculator {
+    fun workedHours(entry: CompTimeEntryEntity): Double {
+        if (entry.entryType != CompTimeEntryType.WORK_DAY) return 0.0
+        val start = entry.timeInMinutes ?: return 0.0
+        val end = entry.timeOutMinutes ?: return 0.0
+        val netMinutes = (end - start - entry.breakMinutes).coerceAtLeast(0)
+        return netMinutes / 60.0
+    }
+
+    fun compDeltaHours(entry: CompTimeEntryEntity, dailyBaselineHours: Double): Double {
+        return when (entry.entryType) {
+            CompTimeEntryType.WORK_DAY -> {
+                if (entry.timeInMinutes == null || entry.timeOutMinutes == null) 0.0
+                else workedHours(entry) - dailyBaselineHours
+            }
+            CompTimeEntryType.COMP_USED -> -entry.usedCompHours.coerceAtLeast(0.0)
+        }
+    }
+
+    fun summarize(
+        entries: List<CompTimeEntryEntity>,
+        dailyBaselineHours: Double,
+        today: LocalDate = LocalDate.now()
+    ): CompTimeSummary {
+        var net = 0.0
+        var earned = 0.0
+        var used = 0.0
+        val weekStart = today.minusDays((today.dayOfWeek.value % 7).toLong()).toEpochDay()
+        val weekEnd = weekStart + 6L
+        var weekWorked = 0.0
+
+        entries.forEach { e ->
+            val delta = compDeltaHours(e, dailyBaselineHours)
+            net += delta
+            if (delta > 0.0) earned += delta
+            if (delta < 0.0) used += -delta
+            if (e.dateEpochDay in weekStart..weekEnd) {
+                weekWorked += workedHours(e)
+            }
+        }
+
+        return CompTimeSummary(
+            netBalanceHours = net,
+            totalEarnedHours = earned,
+            totalUsedHours = used,
+            weekWorkedHours = weekWorked
+        )
+    }
+
+    fun formatSignedHours(hours: Double): String {
+        val rounded = kotlin.math.round(hours * 100.0) / 100.0
+        val prefix = if (rounded > 0.0) "+" else ""
+        return "$prefix${WonderlandTimeFormat.formatHours(rounded)}"
     }
 }

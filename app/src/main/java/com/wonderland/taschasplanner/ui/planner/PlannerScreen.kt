@@ -90,7 +90,7 @@ fun PlannerScreen(
     val selectedDate = state.selectedDate
     val employeeNames = remember(state.contacts) { state.contacts.associate { it.id to it.fullName } }
 
-    val allUnified = remember(state, buildingFilterId) {
+    val allUnified = remember(state, buildingFilterId, selectedDate.year) {
         PlannerAggregator.buildUnifiedItems(
             tasks = state.tasks,
             shifts = state.shifts,
@@ -98,7 +98,9 @@ fun PlannerScreen(
             buildingsById = state.buildingsById,
             employeeNamesById = employeeNames,
             visibleCalendarIds = state.visibleCalendarIds,
-            buildingFilterId = buildingFilterId
+            buildingFilterId = buildingFilterId,
+            contactsWithBirthdays = state.contacts,
+            birthdayYears = listOf(selectedDate.year - 1, selectedDate.year, selectedDate.year + 1)
         )
     }
 
@@ -192,7 +194,6 @@ fun PlannerScreen(
                 PlannerViewMode.DAY -> DailyPlannerView(
                     date = selectedDate,
                     items = itemsByDay[selectedDate.toEpochDay()].orEmpty(),
-                    conflictingShiftIds = state.conflictingShiftIds,
                     onPrevDay = { onSelectDate(selectedDate.minusDays(1)) },
                     onNextDay = { onSelectDate(selectedDate.plusDays(1)) },
                     onEditTask = onEditTask,
@@ -203,7 +204,6 @@ fun PlannerScreen(
                 PlannerViewMode.WEEK -> WeeklyPlannerView(
                     selectedDate = selectedDate,
                     itemsByDay = itemsByDay,
-                    conflictingShiftIds = state.conflictingShiftIds,
                     onSelectDate = onSelectDate,
                     onEditTask = onEditTask,
                     onCycleTaskStatus = onCycleTaskStatus,
@@ -213,7 +213,6 @@ fun PlannerScreen(
                 PlannerViewMode.MONTH -> MonthlyPlannerView(
                     selectedDate = selectedDate,
                     itemsByDay = itemsByDay,
-                    conflictingShiftIds = state.conflictingShiftIds,
                     isExpandedWidth = isExpandedWidth,
                     onSelectDate = onSelectDate,
                     onEditTask = onEditTask,
@@ -229,7 +228,6 @@ fun PlannerScreen(
 private fun DailyPlannerView(
     date: LocalDate,
     items: List<UnifiedPlannerItem>,
-    conflictingShiftIds: Set<Long>,
     onPrevDay: () -> Unit,
     onNextDay: () -> Unit,
     onEditTask: (TaskEntity) -> Unit,
@@ -267,7 +265,6 @@ private fun DailyPlannerView(
             items(items, key = { it.id }) { item ->
                 UnifiedAgendaRow(
                     item = item,
-                    hasConflict = item.shiftEntity?.id in conflictingShiftIds,
                     onClick = {
                         item.taskEntity?.let(onEditTask)
                         item.shiftEntity?.let(onEditShift)
@@ -283,7 +280,6 @@ private fun DailyPlannerView(
 private fun WeeklyPlannerView(
     selectedDate: LocalDate,
     itemsByDay: Map<Long, List<UnifiedPlannerItem>>,
-    conflictingShiftIds: Set<Long>,
     onSelectDate: (LocalDate) -> Unit,
     onEditTask: (TaskEntity) -> Unit,
     onCycleTaskStatus: (TaskEntity) -> Unit,
@@ -385,7 +381,6 @@ private fun WeeklyPlannerView(
             items(selectedDayItems, key = { it.id }) { item ->
                 UnifiedAgendaRow(
                     item = item,
-                    hasConflict = item.shiftEntity?.id in conflictingShiftIds,
                     onClick = {
                         item.taskEntity?.let(onEditTask)
                         item.shiftEntity?.let(onEditShift)
@@ -418,7 +413,6 @@ private fun WeeklyPlannerView(
                 items(itemsByDay[day.toEpochDay()].orEmpty(), key = { "wk_${it.id}" }) { item ->
                     UnifiedAgendaRow(
                         item = item,
-                        hasConflict = item.shiftEntity?.id in conflictingShiftIds,
                         onClick = {
                             item.taskEntity?.let(onEditTask)
                             item.shiftEntity?.let(onEditShift)
@@ -435,7 +429,6 @@ private fun WeeklyPlannerView(
 private fun MonthlyPlannerView(
     selectedDate: LocalDate,
     itemsByDay: Map<Long, List<UnifiedPlannerItem>>,
-    conflictingShiftIds: Set<Long>,
     isExpandedWidth: Boolean,
     onSelectDate: (LocalDate) -> Unit,
     onEditTask: (TaskEntity) -> Unit,
@@ -570,7 +563,6 @@ private fun MonthlyPlannerView(
                     items(dayItems, key = { "mo_${it.id}" }) { item ->
                         UnifiedAgendaRow(
                             item = item,
-                            hasConflict = item.shiftEntity?.id in conflictingShiftIds,
                             onClick = {
                                 item.taskEntity?.let(onEditTask)
                                 item.shiftEntity?.let(onEditShift)

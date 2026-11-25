@@ -118,3 +118,27 @@ interface CalendarPrefDao {
     @Query("UPDATE calendar_prefs SET isVisible = :isVisible WHERE calendarId = :calendarId")
     suspend fun setVisibility(calendarId: Long, isVisible: Boolean)
 }
+
+@Dao
+interface CompTimeDao {
+    @Query("SELECT * FROM comp_time_entries ORDER BY dateEpochDay DESC, id DESC")
+    fun observeAllEntries(): Flow<List<CompTimeEntryEntity>>
+
+    @Query("SELECT * FROM comp_time_entries ORDER BY id ASC")
+    suspend fun getAllEntriesOnce(): List<CompTimeEntryEntity>
+
+    @Query("SELECT * FROM comp_time_entries WHERE dateEpochDay = :epochDay AND entryType = 'WORK_DAY' ORDER BY id DESC LIMIT 1")
+    suspend fun getWorkEntryForDate(epochDay: Long): CompTimeEntryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entry: CompTimeEntryEntity): Long
+
+    @Update
+    suspend fun update(entry: CompTimeEntryEntity)
+
+    @Delete
+    suspend fun delete(entry: CompTimeEntryEntity)
+
+    @Query("DELETE FROM comp_time_entries")
+    suspend fun deleteAll()
+}

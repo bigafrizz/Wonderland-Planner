@@ -869,8 +869,10 @@ fun ContactEditorDialog(
     initial: ContactEntity?,
     defaultType: ContactType,
     buildings: List<BuildingEntity>,
+    writableCalendars: List<DeviceCalendar> = emptyList(),
+    defaultCalendarId: Long? = null,
     onDismiss: () -> Unit,
-    onSave: (ContactEntity) -> Unit,
+    onSave: (ContactEntity, Long?) -> Unit,
     onDelete: ((ContactEntity) -> Unit)? = null
 ) {
     var type by remember { mutableStateOf(initial?.type ?: defaultType) }
@@ -882,6 +884,23 @@ fun ContactEditorDialog(
     var suit by remember { mutableStateOf(initial?.cardSuit ?: CardSuit.HEART) }
     var notes by remember { mutableStateOf(initial?.notes ?: "") }
     var isFavorite by remember { mutableStateOf(initial?.isFavorite ?: false) }
+
+    var hasBirthday by remember { mutableStateOf(initial?.birthdayMonth != null && initial.birthdayDay != null) }
+    var birthdayMonth by remember { mutableIntStateOf(initial?.birthdayMonth ?: 1) }
+    var birthdayDay by remember { mutableIntStateOf(initial?.birthdayDay ?: 1) }
+    var pushBirthdayToCal by remember { mutableStateOf(false) }
+    var selectedCalendarId by remember {
+        mutableStateOf(
+            defaultCalendarId?.takeIf { id -> writableCalendars.any { it.id == id } }
+                ?: writableCalendars.firstOrNull()?.id
+        )
+    }
+    val monthShortNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    val maxDayForMonth = when (birthdayMonth) {
+        2 -> 29
+        4, 6, 9, 11 -> 30
+        else -> 31
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -987,6 +1006,104 @@ fun ContactEditorDialog(
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Yearly Birthday section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("\uD83C\uDF82 Yearly Birthday", style = MaterialTheme.typography.labelLarge)
+                    Switch(checked = hasBirthday, onCheckedChange = { hasBirthday = it })
+                }
+
+                if (hasBirthday) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        monthShortNames.forEachIndexed { idx, label ->
+                            val m = idx + 1
+                            FilterChip(
+                                selected = birthdayMonth == m,
+                                onClick = {
+                                    birthdayMonth = m
+                                    val maxD = when (m) {
+                                        2 -> 29
+                                        4, 6, 9, 11 -> 30
+                                        else -> 31
+                                    }
+                                    if (birthdayDay > maxD) birthdayDay = maxD
+                                },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Day of Month", style = MaterialTheme.typography.labelLarge)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { birthdayDay = (birthdayDay - 1).coerceAtLeast(1) }) {
+                                Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
+                            }
+                            Text(
+                                WonderlandTimeFormat.formatBirthday(birthdayMonth, birthdayDay),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            IconButton(onClick = { birthdayDay = (birthdayDay + 1).coerceAtMost(maxDayForMonth) }) {
+                                Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
+                            }
+                        }
+                    }
+
+                    if (initial?.linkedBirthdayEventId != null) {
+                        Text(
+                            text = "✓ Yearly birthday synced to Google Calendar",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    } else if (writableCalendars.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Add yearly event to Google Calendar",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(checked = pushBirthdayToCal, onCheckedChange = { pushBirthdayToCal = it })
+                        }
+                        if (pushBirthdayToCal) {
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                writableCalendars.forEach { cal ->
+                                    FilterChip(
+                                        selected = selectedCalendarId == cal.id,
+                                        onClick = { selectedCalendarId = cal.id },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(cal.colorInt))
+                                            )
+                                        },
+                                        label = { Text(cal.displayName) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1012,8 +1129,12 @@ fun ContactEditorDialog(
                             buildingId = buildingId,
                             cardSuit = suit,
                             notes = notes.trim(),
-                            isFavorite = isFavorite
-                        )
+                            isFavorite = isFavorite,
+                            birthdayMonth = if (hasBirthday) birthdayMonth else null,
+                            birthdayDay = if (hasBirthday) birthdayDay else null,
+                            linkedBirthdayEventId = initial?.linkedBirthdayEventId
+                        ),
+                        if (hasBirthday && pushBirthdayToCal) selectedCalendarId else null
                     )
                     onDismiss()
                 }

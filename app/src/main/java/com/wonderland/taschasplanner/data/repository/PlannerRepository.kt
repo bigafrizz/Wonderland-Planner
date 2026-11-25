@@ -4,7 +4,10 @@ import android.content.Context
 import com.wonderland.taschasplanner.data.calendar.GoogleCalendarRepository
 import com.wonderland.taschasplanner.data.local.BuildingEntity
 import com.wonderland.taschasplanner.data.local.CalendarPrefEntity
+import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
+import com.wonderland.taschasplanner.data.local.CompTimeEntryType
 import com.wonderland.taschasplanner.data.local.ContactEntity
+import com.wonderland.taschasplanner.data.local.RecurrenceRule
 import com.wonderland.taschasplanner.data.local.SampleDataSeeder
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
@@ -51,6 +54,18 @@ class PlannerRepository(
     val tasks: Flow<List<TaskEntity>> = db.taskDao().observeAllTasks()
     val shifts: Flow<List<ShiftScheduleEntity>> = db.shiftScheduleDao().observeAllShifts()
     val calendarPrefs: Flow<List<CalendarPrefEntity>> = db.calendarPrefDao().observeCalendarPrefs()
+    val compTimeEntries: Flow<List<CompTimeEntryEntity>> = db.compTimeDao().observeAllEntries()
+
+    private val _dailyBaselineHours = MutableStateFlow(
+        prefs.getFloat(KEY_COMP_BASELINE, 8.0f).toDouble()
+    )
+    val dailyBaselineHours: StateFlow<Double> = _dailyBaselineHours.asStateFlow()
+
+    fun setDailyBaselineHours(hours: Double) {
+        val clamped = hours.coerceIn(4.0, 12.0)
+        _dailyBaselineHours.value = clamped
+        prefs.edit().putFloat(KEY_COMP_BASELINE, clamped.toFloat()).apply()
+    }
 
     fun setThemeMode(mode: ThemeMode) {
         _themeMode.value = mode
@@ -93,15 +108,71 @@ class PlannerRepository(
     suspend fun deleteBuilding(building: BuildingEntity) = db.buildingDao().delete(building)
 
     // --- Contacts ---
-    suspend fun saveContact(contact: ContactEntity): Long {
-        return if (contact.id == 0L) db.contactDao().insert(contact)
+    suspend fun saveContact(
+        contact: ContactEntity,
+        pushBirthdayCalendarId: Long? = null,
+        buildingName: String = ""
+    ): Long {
+        var linkedBdayId = contact.linkedBirthdayEventId
+        val hasBirthday = contact.birthdayMonth != null && contact.birthdayDay != null
+
+        if (googleCalendarRepository.hasWritePermission()) {
+            if (!hasBirthday && linkedBdayId != null) {
+                googleCalendarRepository.deleteEvent(linkedBdayId)
+                linkedBdayId = null
+            } else if (hasBirthday) {
+                val month = contact.birthdayMonth!!
+                val day = contact.birthdayDay!!
+                val year = LocalDate.now().year
+                val maxDay = java.time.YearMonth.of(year, month).lengthOfMonth()
+                val bdayDate = LocalDate.of(year, month, day.coerceAtMost(maxDay))
+                val title = "\uD83C\uDF82 ${contact.fullName}'s Birthday"
+                val desc = listOfNotNull(
+                    contact.roleOrCompany.takeIf { it.isNotBlank() },
+                    "Added from Tascha's Wonderland Planner"
+                ).joinToString(" • ")
+
+                if (linkedBdayId != null) {
+                    googleCalendarRepository.updateEvent(
+                        eventId = linkedBdayId,
+                        title = title,
+                        description = desc,
+                        location = buildingName,
+                        date = bdayDate,
+                        startMinutes = null,
+                        endMinutes = null,
+                        recurrence = RecurrenceRule.YEARLY
+                    )
+                } else if (pushBirthdayCalendarId != null) {
+                    setLastPushCalendarId(pushBirthdayCalendarId)
+                    linkedBdayId = googleCalendarRepository.insertEvent(
+                        calendarId = pushBirthdayCalendarId,
+                        title = title,
+                        description = desc,
+                        location = buildingName,
+                        date = bdayDate,
+                        startMinutes = null,
+                        endMinutes = null,
+                        recurrence = RecurrenceRule.YEARLY
+                    )
+                }
+            }
+        }
+
+        val toSave = contact.copy(linkedBirthdayEventId = linkedBdayId)
+        return if (toSave.id == 0L) db.contactDao().insert(toSave)
         else {
-            db.contactDao().update(contact)
-            contact.id
+            db.contactDao().update(toSave)
+            toSave.id
         }
     }
 
-    suspend fun deleteContact(contact: ContactEntity) = db.contactDao().delete(contact)
+    suspend fun deleteContact(contact: ContactEntity) {
+        contact.linkedBirthdayEventId?.let { eventId ->
+            googleCalendarRepository.deleteEvent(eventId)
+        }
+        db.contactDao().delete(contact)
+    }
 
     fun getLastPushCalendarId(): Long? {
         val id = prefs.getLong(KEY_LAST_PUSH_CALENDAR, -1L)
@@ -221,6 +292,45 @@ class PlannerRepository(
         shifts.forEach { db.shiftScheduleDao().delete(it) }
     }
 
+    // --- Comp Time ---
+    suspend fun saveCompTimeEntry(entry: CompTimeEntryEntity): Long {
+        return if (entry.id == 0L) db.compTimeDao().insert(entry)
+        else {
+            db.compTimeDao().update(entry)
+            entry.id
+        }
+    }
+
+    suspend fun deleteCompTimeEntry(entry: CompTimeEntryEntity) = db.compTimeDao().delete(entry)
+
+    suspend fun clockInOrOutToday(nowMinutes: Int, todayEpochDay: Long = LocalDate.now().toEpochDay()) {
+        val existing = db.compTimeDao().getWorkEntryForDate(todayEpochDay)
+        if (existing == null) {
+            db.compTimeDao().insert(
+                CompTimeEntryEntity(
+                    dateEpochDay = todayEpochDay,
+                    entryType = CompTimeEntryType.WORK_DAY,
+                    timeInMinutes = nowMinutes,
+                    timeOutMinutes = null,
+                    breakMinutes = 30
+                )
+            )
+        } else if (existing.timeOutMinutes == null) {
+            db.compTimeDao().update(existing.copy(timeOutMinutes = nowMinutes.coerceAtLeast((existing.timeInMinutes ?: 0) + 1)))
+        } else {
+            // Start a second work block today if already clocked out
+            db.compTimeDao().insert(
+                CompTimeEntryEntity(
+                    dateEpochDay = todayEpochDay,
+                    entryType = CompTimeEntryType.WORK_DAY,
+                    timeInMinutes = nowMinutes,
+                    timeOutMinutes = null,
+                    breakMinutes = 0
+                )
+            )
+        }
+    }
+
     // --- Google Calendar Sync ---
     suspend fun refreshGoogleCalendars(centerDate: LocalDate = LocalDate.now()) {
         val granted = googleCalendarRepository.hasReadPermission()
@@ -272,5 +382,6 @@ class PlannerRepository(
         private const val KEY_SAMPLE_CALENDAR = "sample_calendar_preview"
         private const val KEY_INITIAL_SEED_DONE = "initial_seed_done"
         private const val KEY_LAST_PUSH_CALENDAR = "last_push_calendar_id"
+        private const val KEY_COMP_BASELINE = "comp_daily_baseline_hours"
     }
 }

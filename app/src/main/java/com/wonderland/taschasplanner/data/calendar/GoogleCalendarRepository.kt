@@ -296,6 +296,7 @@ class GoogleCalendarRepository(private val context: Context) {
             RecurrenceRule.DAILY -> "FREQ=DAILY"
             RecurrenceRule.WEEKLY -> "FREQ=WEEKLY"
             RecurrenceRule.MONTHLY -> "FREQ=MONTHLY"
+            RecurrenceRule.YEARLY -> "FREQ=YEARLY"
         }
     }
 

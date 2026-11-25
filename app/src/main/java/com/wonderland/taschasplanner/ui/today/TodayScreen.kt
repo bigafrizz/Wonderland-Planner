@@ -24,7 +24,6 @@ import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -83,8 +82,10 @@ fun TodayScreen(
             calendarEvents = state.calendarEvents.filter { it.dateEpochDay() == todayEpoch },
             buildingsById = state.buildingsById,
             employeeNamesById = employeeNames,
-            visibleCalendarIds = state.visibleCalendarIds
-        )
+            visibleCalendarIds = state.visibleCalendarIds,
+            contactsWithBirthdays = state.contacts,
+            birthdayYears = listOf(today.year)
+        ).filter { it.dateEpochDay == todayEpoch }
     }
 
     val openTasksToday = state.tasks.count { it.dueDateEpochDay == todayEpoch && it.status != TaskStatus.DONE }
@@ -154,33 +155,6 @@ fun TodayScreen(
                 }
             }
 
-            // Shift conflict banner if any exist today
-            val todayConflicts = state.shifts.count {
-                it.dateEpochDay == todayEpoch && it.id in state.conflictingShiftIds
-            }
-            if (todayConflicts > 0) {
-                item {
-                    WonderlandCard(accentColor = MaterialTheme.colorScheme.error) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Outlined.WarningAmber,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Shift overlap detected across buildings today! Check the Buildings tab to resolve.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
-            }
-
             // Buildings at a Glance
             item {
                 Row(
@@ -245,7 +219,6 @@ fun TodayScreen(
                 items(todayItems, key = { it.id }) { item ->
                     UnifiedAgendaRow(
                         item = item,
-                        hasConflict = item.shiftEntity?.id in state.conflictingShiftIds,
                         onClick = {
                             item.taskEntity?.let(onEditTask)
                             item.shiftEntity?.let(onEditShift)
@@ -346,7 +319,6 @@ private fun BuildingGlanceCard(
 @Composable
 fun UnifiedAgendaRow(
     item: UnifiedPlannerItem,
-    hasConflict: Boolean,
     onClick: () -> Unit,
     onToggleTaskDone: () -> Unit
 ) {
@@ -356,11 +328,12 @@ fun UnifiedAgendaRow(
         PlannerItemSource.GOOGLE_CALENDAR -> "Google Cal"
         PlannerItemSource.TASK -> item.taskEntity?.priority?.displayLabel ?: "Task"
         PlannerItemSource.SHIFT -> "Shift"
+        PlannerItemSource.BIRTHDAY -> "Birthday"
     }
 
     WonderlandCard(
         modifier = Modifier.fillMaxWidth(),
-        accentColor = if (hasConflict) MaterialTheme.colorScheme.error else accent,
+        accentColor = accent,
         onClick = onClick
     ) {
         Row(
@@ -374,7 +347,7 @@ fun UnifiedAgendaRow(
                     .width(4.dp)
                     .height(48.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (hasConflict) MaterialTheme.colorScheme.error else accent)
+                    .background(accent)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -394,14 +367,6 @@ fun UnifiedAgendaRow(
                             style = MaterialTheme.typography.labelSmall,
                             color = accent,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                    if (hasConflict) {
-                        Icon(
-                            Icons.Outlined.WarningAmber,
-                            contentDescription = "Conflict",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }

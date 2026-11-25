@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
@@ -387,12 +386,11 @@ fun BuildingsScreen(
                         items(filteredShifts, key = { it.id }) { shift ->
                             val emp = state.contactsById[shift.employeeId]
                             val bldg = state.buildingsById[shift.buildingId]
-                            val hasConflict = shift.id in state.conflictingShiftIds
                             val isSelected = shift.id in selectedShiftIds
-                            val accent = when {
-                                isSelected -> MaterialTheme.colorScheme.primary
-                                hasConflict -> MaterialTheme.colorScheme.error
-                                else -> Color(bldg?.colorHex ?: 0xFF1A5F6BL)
+                            val accent = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color(bldg?.colorHex ?: 0xFF1A5F6BL)
                             }
 
                             WonderlandCard(
@@ -427,21 +425,10 @@ fun BuildingsScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = emp?.fullName ?: "Employee",
-                                                    style = MaterialTheme.typography.titleMedium
-                                                )
-                                                if (hasConflict) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Icon(
-                                                        Icons.Outlined.WarningAmber,
-                                                        contentDescription = "Overlapping shift conflict",
-                                                        tint = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            }
+                                            Text(
+                                                text = emp?.fullName ?: "Employee",
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
                                             if (!isSelectionMode) {
                                                 AssistChip(
                                                     onClick = { onCycleShiftStatus(shift) },
@@ -477,14 +464,6 @@ fun BuildingsScreen(
                                                 text = shift.stationOrRole,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        if (hasConflict) {
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "Double-booked: overlaps another shift for this employee.",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.error
                                             )
                                         }
                                     }

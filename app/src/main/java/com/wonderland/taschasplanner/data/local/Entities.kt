@@ -33,7 +33,8 @@ enum class RecurrenceRule(val displayLabel: String) {
     NONE("One-Time"),
     DAILY("Daily"),
     WEEKLY("Weekly"),
-    MONTHLY("Monthly")
+    MONTHLY("Monthly"),
+    YEARLY("Yearly")
 }
 
 enum class ShiftStatus(val displayLabel: String) {
@@ -56,6 +57,11 @@ enum class ThemeMode(val displayLabel: String) {
     STORYBOOK_LIGHT("Storybook Parchment (Light)"),
     CHESHIRE_DARK("Cheshire Twilight (Dark)"),
     SYSTEM("Follow System")
+}
+
+enum class CompTimeEntryType(val displayLabel: String) {
+    WORK_DAY("Daily Time In/Out"),
+    COMP_USED("Comp Time Used")
 }
 
 @Entity(tableName = "buildings")
@@ -91,7 +97,10 @@ data class ContactEntity(
     val buildingId: Long? = null,
     val cardSuit: CardSuit = CardSuit.SPADE,
     val notes: String = "",
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val birthdayMonth: Int? = null,
+    val birthdayDay: Int? = null,
+    val linkedBirthdayEventId: Long? = null
 )
 
 @Entity(
@@ -182,6 +191,21 @@ data class CalendarPrefEntity(
     val isVisible: Boolean = true
 )
 
+@Entity(
+    tableName = "comp_time_entries",
+    indices = [Index("dateEpochDay")]
+)
+data class CompTimeEntryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val dateEpochDay: Long,
+    val entryType: CompTimeEntryType = CompTimeEntryType.WORK_DAY,
+    val timeInMinutes: Int? = null,
+    val timeOutMinutes: Int? = null,
+    val breakMinutes: Int = 30,
+    val usedCompHours: Double = 0.0,
+    val notes: String = ""
+)
+
 class WonderlandTypeConverters {
     @TypeConverter fun fromContactType(v: ContactType): String = v.name
     @TypeConverter fun toContactType(v: String): ContactType = ContactType.valueOf(v)
@@ -200,4 +224,7 @@ class WonderlandTypeConverters {
 
     @TypeConverter fun fromCardSuit(v: CardSuit): String = v.name
     @TypeConverter fun toCardSuit(v: String): CardSuit = CardSuit.valueOf(v)
+
+    @TypeConverter fun fromCompTimeEntryType(v: CompTimeEntryType): String = v.name
+    @TypeConverter fun toCompTimeEntryType(v: String): CompTimeEntryType = CompTimeEntryType.valueOf(v)
 }
