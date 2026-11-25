@@ -38,6 +38,7 @@ import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
+import com.wonderland.taschasplanner.data.model.ScheduleBatchMatcher
 import com.wonderland.taschasplanner.ui.WonderlandViewModel
 import com.wonderland.taschasplanner.ui.buildings.BuildingsScreen
 import com.wonderland.taschasplanner.ui.components.BuildingEditorDialog
@@ -206,6 +207,7 @@ fun WonderlandApp(
                         showShiftDialog = true
                     },
                     onCycleShiftStatus = viewModel::cycleShiftStatus,
+                    onDeleteShifts = viewModel::deleteShifts,
                     onAddTask = {
                         editingTask = null
                         taskDefaultDate = state.selectedDate
@@ -216,7 +218,8 @@ fun WonderlandApp(
                         taskDefaultDate = LocalDate.ofEpochDay(it.dueDateEpochDay)
                         showTaskDialog = true
                     },
-                    onCycleTaskStatus = viewModel::cycleTaskStatus
+                    onCycleTaskStatus = viewModel::cycleTaskStatus,
+                    onDeleteTasks = viewModel::deleteTasks
                 )
 
                 WonderlandDestination.CONTACTS -> ContactsScreen(
@@ -310,6 +313,7 @@ fun WonderlandApp(
 
     // --- Modal Editors ---
     if (showTaskDialog) {
+        val matchingTasks = editingTask?.let { ScheduleBatchMatcher.matchingTasks(it, state.tasks) }.orEmpty()
         TaskEditorDialog(
             initial = editingTask,
             defaultDate = taskDefaultDate,
@@ -318,6 +322,7 @@ fun WonderlandApp(
             customers = state.customers,
             writableCalendars = state.deviceCalendars.filter { it.isWritable },
             defaultCalendarId = viewModel.lastPushCalendarId(),
+            matchingCount = matchingTasks.size.coerceAtLeast(1),
             onDismiss = { showTaskDialog = false },
             onSave = { task, targetDates, pushCalId ->
                 val bldgName = task.buildingId?.let { state.buildingsById[it]?.name } ?: ""
@@ -330,21 +335,29 @@ fun WonderlandApp(
                 ).joinToString(" | ")
                 viewModel.saveTasksForDates(task, targetDates, pushCalId, bldgName, extraDetails)
             },
-            onDelete = viewModel::deleteTask
+            onDelete = viewModel::deleteTask,
+            onDeleteMatching = { target ->
+                viewModel.deleteTasks(ScheduleBatchMatcher.matchingTasks(target, state.tasks))
+            }
         )
     }
 
     if (showShiftDialog) {
+        val matchingShifts = editingShift?.let { ScheduleBatchMatcher.matchingShifts(it, state.shifts) }.orEmpty()
         ShiftEditorDialog(
             initial = editingShift,
             defaultDate = state.selectedDate,
             buildings = state.buildings,
             employees = state.employees,
+            matchingCount = matchingShifts.size.coerceAtLeast(1),
             onDismiss = { showShiftDialog = false },
             onSave = { shift, targetDates ->
                 viewModel.saveShiftsForDates(shift, targetDates)
             },
-            onDelete = viewModel::deleteShift
+            onDelete = viewModel::deleteShift,
+            onDeleteMatching = { target ->
+                viewModel.deleteShifts(ScheduleBatchMatcher.matchingShifts(target, state.shifts))
+            }
         )
     }
 

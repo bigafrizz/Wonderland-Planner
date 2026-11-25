@@ -179,4 +179,21 @@ class PlannerAggregatorTest {
         )
         assertEquals(20, weekdaysFourWeeks.size)
     }
+
+    @Test
+    fun batchMatcherFindsMatchingTasksAndShiftsAcrossWeeks() {
+        val t1 = TaskEntity(id = 1L, title = "Morning Check", assignedEmployeeId = 10L, buildingId = manor.id, dueDateEpochDay = todayEpoch, startTimeMinutes = 540, endTimeMinutes = 600)
+        val t2 = t1.copy(id = 2L, dueDateEpochDay = todayEpoch + 7)
+        val otherTask = t1.copy(id = 3L, title = "Different Task")
+
+        val matchedTasks = com.wonderland.taschasplanner.data.model.ScheduleBatchMatcher.matchingTasks(t1, listOf(t1, t2, otherTask))
+        assertEquals(listOf(1L, 2L), matchedTasks.map { it.id })
+
+        val s1 = ShiftScheduleEntity(id = 10L, employeeId = 10L, buildingId = manor.id, dateEpochDay = todayEpoch, isFlexibleHours = true, allocatedHours = 4.5)
+        val s2 = s1.copy(id = 11L, dateEpochDay = todayEpoch + 7)
+        val otherShift = s1.copy(id = 12L, allocatedHours = 6.0)
+
+        val matchedShifts = com.wonderland.taschasplanner.data.model.ScheduleBatchMatcher.matchingShifts(s1, listOf(s1, s2, otherShift))
+        assertEquals(listOf(10L, 11L), matchedShifts.map { it.id })
+    }
 }

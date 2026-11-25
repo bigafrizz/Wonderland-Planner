@@ -204,6 +204,17 @@ class WonderlandViewModel(
         }
     }
 
+    fun deleteTasks(tasks: List<TaskEntity>) {
+        if (tasks.isEmpty()) return
+        viewModelScope.launch {
+            val hadSynced = tasks.any { it.linkedCalendarEventId != null }
+            repository.deleteTasks(tasks)
+            if (hadSynced) {
+                repository.refreshGoogleCalendars(_selectedDate.value)
+            }
+        }
+    }
+
     fun saveShift(shift: ShiftScheduleEntity) {
         viewModelScope.launch { repository.saveShift(shift) }
     }
@@ -218,6 +229,11 @@ class WonderlandViewModel(
 
     fun deleteShift(shift: ShiftScheduleEntity) {
         viewModelScope.launch { repository.deleteShift(shift) }
+    }
+
+    fun deleteShifts(shifts: List<ShiftScheduleEntity>) {
+        if (shifts.isEmpty()) return
+        viewModelScope.launch { repository.deleteShifts(shifts) }
     }
 
     fun loadSampleData() {

@@ -188,6 +188,10 @@ class PlannerRepository(
         db.taskDao().delete(task)
     }
 
+    suspend fun deleteTasks(tasks: List<TaskEntity>) {
+        tasks.forEach { deleteTask(it) }
+    }
+
     // --- Shifts ---
     suspend fun saveShift(shift: ShiftScheduleEntity): Long {
         return if (shift.id == 0L) db.shiftScheduleDao().insert(shift)
@@ -212,6 +216,10 @@ class PlannerRepository(
     }
 
     suspend fun deleteShift(shift: ShiftScheduleEntity) = db.shiftScheduleDao().delete(shift)
+
+    suspend fun deleteShifts(shifts: List<ShiftScheduleEntity>) {
+        shifts.forEach { db.shiftScheduleDao().delete(it) }
+    }
 
     // --- Google Calendar Sync ---
     suspend fun refreshGoogleCalendars(centerDate: LocalDate = LocalDate.now()) {

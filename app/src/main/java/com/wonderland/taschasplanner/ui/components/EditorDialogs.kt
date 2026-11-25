@@ -68,10 +68,13 @@ fun TaskEditorDialog(
     customers: List<ContactEntity>,
     writableCalendars: List<DeviceCalendar>,
     defaultCalendarId: Long?,
+    matchingCount: Int = 1,
     onDismiss: () -> Unit,
     onSave: (TaskEntity, List<LocalDate>, Long?) -> Unit,
-    onDelete: ((TaskEntity) -> Unit)? = null
+    onDelete: ((TaskEntity) -> Unit)? = null,
+    onDeleteMatching: ((TaskEntity) -> Unit)? = null
 ) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf(initial?.title ?: "") }
     var description by remember { mutableStateOf(initial?.description ?: "") }
     var roomOrZone by remember { mutableStateOf(initial?.roomOrZone ?: "") }
@@ -111,7 +114,16 @@ fun TaskEditorDialog(
             ) {
                 Text(if (initial == null) "New Wonderland Task" else "Edit Task")
                 if (initial != null && onDelete != null) {
-                    IconButton(onClick = { onDelete(initial); onDismiss() }) {
+                    IconButton(
+                        onClick = {
+                            if (matchingCount > 1 && onDeleteMatching != null) {
+                                showDeleteConfirm = true
+                            } else {
+                                onDelete(initial)
+                                onDismiss()
+                            }
+                        }
+                    ) {
                         Icon(Icons.Outlined.Delete, contentDescription = "Delete task", tint = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -407,6 +419,39 @@ fun TaskEditorDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+
+    if (showDeleteConfirm && initial != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Task") },
+            text = {
+                Text("Found $matchingCount matching \"${initial.title}\" tasks across dates. Delete just this one or all $matchingCount matching tasks?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteMatching?.invoke(initial)
+                        showDeleteConfirm = false
+                        onDismiss()
+                    }
+                ) {
+                    Text("Delete All $matchingCount", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                    TextButton(
+                        onClick = {
+                            onDelete?.invoke(initial)
+                            showDeleteConfirm = false
+                            onDismiss()
+                        }
+                    ) { Text("Only This One") }
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -415,10 +460,13 @@ fun ShiftEditorDialog(
     defaultDate: LocalDate,
     buildings: List<BuildingEntity>,
     employees: List<ContactEntity>,
+    matchingCount: Int = 1,
     onDismiss: () -> Unit,
     onSave: (ShiftScheduleEntity, List<LocalDate>) -> Unit,
-    onDelete: ((ShiftScheduleEntity) -> Unit)? = null
+    onDelete: ((ShiftScheduleEntity) -> Unit)? = null,
+    onDeleteMatching: ((ShiftScheduleEntity) -> Unit)? = null
 ) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var selectedEmployeeId by remember { mutableStateOf(initial?.employeeId ?: employees.firstOrNull()?.id) }
     var selectedBuildingId by remember { mutableStateOf(initial?.buildingId ?: buildings.firstOrNull()?.id) }
     var dateEpochDay by remember { mutableLongStateOf(initial?.dateEpochDay ?: defaultDate.toEpochDay()) }
@@ -448,7 +496,16 @@ fun ShiftEditorDialog(
             ) {
                 Text(if (initial == null) "Schedule Employee Shift" else "Edit Shift")
                 if (initial != null && onDelete != null) {
-                    IconButton(onClick = { onDelete(initial); onDismiss() }) {
+                    IconButton(
+                        onClick = {
+                            if (matchingCount > 1 && onDeleteMatching != null) {
+                                showDeleteConfirm = true
+                            } else {
+                                onDelete(initial)
+                                onDismiss()
+                            }
+                        }
+                    ) {
                         Icon(Icons.Outlined.Delete, contentDescription = "Delete shift", tint = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -664,6 +721,39 @@ fun ShiftEditorDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+
+    if (showDeleteConfirm && initial != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Shift") },
+            text = {
+                Text("Found $matchingCount matching shifts across dates for this employee & building. Delete just this one or all $matchingCount matching shifts?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteMatching?.invoke(initial)
+                        showDeleteConfirm = false
+                        onDismiss()
+                    }
+                ) {
+                    Text("Delete All $matchingCount", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                    TextButton(
+                        onClick = {
+                            onDelete?.invoke(initial)
+                            showDeleteConfirm = false
+                            onDismiss()
+                        }
+                    ) { Text("Only This One") }
+                }
+            }
+        )
+    }
 }
 
 @Composable

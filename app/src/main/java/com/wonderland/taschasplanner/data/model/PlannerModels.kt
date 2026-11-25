@@ -306,3 +306,37 @@ object ScheduleDateExpander {
         return results.ifEmpty { listOf(startDate) }
     }
 }
+
+object ScheduleBatchMatcher {
+    /**
+     * Finds all tasks matching the same title, employee, building, and time slot (e.g. a multi-week batch).
+     */
+    fun matchingTasks(target: TaskEntity, allTasks: List<TaskEntity>): List<TaskEntity> {
+        return allTasks.filter { other ->
+            other.title.equals(target.title, ignoreCase = true) &&
+                other.assignedEmployeeId == target.assignedEmployeeId &&
+                other.buildingId == target.buildingId &&
+                other.startTimeMinutes == target.startTimeMinutes &&
+                other.endTimeMinutes == target.endTimeMinutes
+        }
+    }
+
+    /**
+     * Finds all shifts matching the same employee, building, schedule mode, and time/hours (e.g. a multi-week batch).
+     */
+    fun matchingShifts(
+        target: ShiftScheduleEntity,
+        allShifts: List<ShiftScheduleEntity>
+    ): List<ShiftScheduleEntity> {
+        return allShifts.filter { other ->
+            other.employeeId == target.employeeId &&
+                other.buildingId == target.buildingId &&
+                other.isFlexibleHours == target.isFlexibleHours &&
+                if (target.isFlexibleHours) {
+                    other.allocatedHours == target.allocatedHours
+                } else {
+                    other.startMinutes == target.startMinutes && other.endMinutes == target.endMinutes
+                }
+        }
+    }
+}
