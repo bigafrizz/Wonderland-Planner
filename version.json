@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "1.4.0",
-  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.4.0/app-debug.apk",
-  "releaseNotes": "Added Comp Time Tracker in the sidebar, Yearly Employee Birthdays (in-app & Google Calendar FREQ=YEARLY sync), and removed shift overlap warnings."
+  "versionCode": 7,
+  "versionName": "1.5.0",
+  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.5.0/app-debug.apk",
+  "releaseNotes": "Full Month view is now the main landing screen with a slide-up Daily Itinerary Card on day tap, added Show/Hide Shifts toggle with All/Multi-select employee dropdown, hardened overnight data persistence with Room TRUNCATE mode and automatic rolling local backup/recovery, and fixed overnight Google Calendar sync drops and reconnection."
 }

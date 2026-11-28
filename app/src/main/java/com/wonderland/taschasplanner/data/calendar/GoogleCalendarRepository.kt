@@ -1,16 +1,24 @@
 package com.wonderland.taschasplanner.data.calendar
 
 import android.Manifest
+import android.accounts.Account
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.CalendarContract
 import androidx.core.content.ContextCompat
 import com.wonderland.taschasplanner.data.local.RecurrenceRule
 import com.wonderland.taschasplanner.data.model.CalendarEvent
 import com.wonderland.taschasplanner.data.model.DeviceCalendar
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
@@ -28,65 +36,122 @@ class GoogleCalendarRepository(private val context: Context) {
             PackageManager.PERMISSION_GRANTED
 
     /**
-     * Reads all calendars synced on the Android device (prioritizing Google accounts).
+     * Registers a ContentObserver on CalendarContract so external changes or overnight
+     * Google Calendar background syncs notify the app immediately.
+     */
+    fun registerCalendarObserver(onChanged: () -> Unit): ContentObserver? {
+        if (!hasReadPermission()) return null
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                onChanged()
+            }
+
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                onChanged()
+            }
+        }
+        return runCatching {
+            context.contentResolver.registerContentObserver(
+                CalendarContract.CONTENT_URI,
+                true,
+                observer
+            )
+            observer
+        }.getOrNull()
+    }
+
+    fun unregisterCalendarObserver(observer: ContentObserver?) {
+        if (observer == null) return
+        runCatching {
+            context.contentResolver.unregisterContentObserver(observer)
+        }
+    }
+
+    /**
+     * Nudges Android's sync adapter for connected Google accounts so stale local calendar
+     * caches refresh from Google's servers after overnight Doze/idle periods.
+     */
+    fun requestAccountCalendarSync(calendars: List<DeviceCalendar>) {
+        val accounts = calendars
+            .filter { it.accountName.isNotBlank() && it.accountType.isNotBlank() }
+            .distinctBy { it.accountName to it.accountType }
+
+        accounts.forEach { cal ->
+            runCatching {
+                val account = Account(cal.accountName, cal.accountType)
+                val extras = Bundle().apply {
+                    putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
+                    putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+                }
+                ContentResolver.requestSync(account, CalendarContract.AUTHORITY, extras)
+            }
+        }
+    }
+
+    /**
+     * Reads all active (non-deleted) calendars synced on the Android device.
+     * Retries once after a brief backoff if the CalendarProvider binder hiccups after Doze.
      */
     suspend fun fetchDeviceCalendars(googleOnly: Boolean = false): List<DeviceCalendar> =
         withContext(Dispatchers.IO) {
             if (!hasReadPermission()) return@withContext emptyList()
-
-            val projection = arrayOf(
-                CalendarContract.Calendars._ID,
-                CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-                CalendarContract.Calendars.ACCOUNT_NAME,
-                CalendarContract.Calendars.ACCOUNT_TYPE,
-                CalendarContract.Calendars.CALENDAR_COLOR,
-                CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
-            )
-            val selection = if (googleOnly) {
-                "${CalendarContract.Calendars.ACCOUNT_TYPE} = ?"
-            } else {
-                null
-            }
-            val selectionArgs = if (googleOnly) arrayOf("com.google") else null
-
-            val results = mutableListOf<DeviceCalendar>()
-            try {
-                context.contentResolver.query(
-                    CalendarContract.Calendars.CONTENT_URI,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    "${CalendarContract.Calendars.ACCOUNT_NAME} ASC, ${CalendarContract.Calendars.CALENDAR_DISPLAY_NAME} ASC"
-                )?.use { cursor ->
-                    val idIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
-                    val nameIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-                    val accNameIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
-                    val accTypeIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
-                    val colorIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
-                    val accessIdx = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-
-                    while (cursor.moveToNext()) {
-                        val access = cursor.getInt(accessIdx)
-                        results.add(
-                            DeviceCalendar(
-                                id = cursor.getLong(idIdx),
-                                displayName = cursor.getString(nameIdx) ?: "Google Calendar",
-                                accountName = cursor.getString(accNameIdx) ?: "",
-                                accountType = cursor.getString(accTypeIdx) ?: "",
-                                colorInt = cursor.getInt(colorIdx),
-                                isWritable = access >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
-                            )
-                        )
-                    }
-                }
-            } catch (_: SecurityException) {
-                return@withContext emptyList()
-            }
-            results
+            retryOnTransientProviderError { queryDeviceCalendarsOnce(googleOnly) }
         }
+
+    private fun queryDeviceCalendarsOnce(googleOnly: Boolean): List<DeviceCalendar> {
+        val projection = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Calendars.ACCOUNT_NAME,
+            CalendarContract.Calendars.ACCOUNT_TYPE,
+            CalendarContract.Calendars.CALENDAR_COLOR,
+            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
+        )
+        val selection = if (googleOnly) {
+            "${CalendarContract.Calendars.DELETED} = 0 AND ${CalendarContract.Calendars.ACCOUNT_TYPE} = ?"
+        } else {
+            "${CalendarContract.Calendars.DELETED} = 0"
+        }
+        val selectionArgs = if (googleOnly) arrayOf("com.google") else null
+
+        val results = mutableListOf<DeviceCalendar>()
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            "${CalendarContract.Calendars.ACCOUNT_NAME} ASC, ${CalendarContract.Calendars.CALENDAR_DISPLAY_NAME} ASC"
+        )?.use { cursor ->
+            val idIdx = cursor.getColumnIndex(CalendarContract.Calendars._ID)
+            val nameIdx = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+            val accNameIdx = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_NAME)
+            val accTypeIdx = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
+            val colorIdx = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
+            val accessIdx = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+
+            if (idIdx < 0) return results
+
+            while (cursor.moveToNext()) {
+                val access = if (accessIdx >= 0) cursor.getInt(accessIdx) else 0
+                results.add(
+                    DeviceCalendar(
+                        id = cursor.getLong(idIdx),
+                        displayName = (if (nameIdx >= 0) cursor.getString(nameIdx) else null)
+                            ?.takeIf { it.isNotBlank() } ?: "Google Calendar",
+                        accountName = if (accNameIdx >= 0) cursor.getString(accNameIdx) ?: "" else "",
+                        accountType = if (accTypeIdx >= 0) cursor.getString(accTypeIdx) ?: "" else "",
+                        colorInt = if (colorIdx >= 0) cursor.getInt(colorIdx) else 0xFF6A1B9A.toInt(),
+                        isWritable = access >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+                    )
+                )
+            }
+        }
+        return results
+    }
 
     /**
      * Queries CalendarContract.Instances to expand recurring Google Calendar events across [startDate, endDate].
+     * Retries once after a brief backoff on transient provider/binder errors.
      */
     suspend fun fetchEventsInRange(
         startDate: LocalDate,
@@ -94,10 +159,18 @@ class GoogleCalendarRepository(private val context: Context) {
         calendarNamesById: Map<Long, String>
     ): List<CalendarEvent> = withContext(Dispatchers.IO) {
         if (!hasReadPermission()) return@withContext emptyList()
+        retryOnTransientProviderError { queryEventsInRangeOnce(startDate, endDate, calendarNamesById) }
+    }
 
+    private fun queryEventsInRangeOnce(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        calendarNamesById: Map<Long, String>
+    ): List<CalendarEvent> {
         val zone = ZoneId.systemDefault()
-        val startMillis = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
-        val endMillis = endDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        // Pad by 1 day on each edge so UTC all-day events near month boundaries are never clipped
+        val startMillis = startDate.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMillis = endDate.plusDays(2).atStartOfDay(zone).toInstant().toEpochMilli()
 
         val uriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(uriBuilder, startMillis)
@@ -116,47 +189,61 @@ class GoogleCalendarRepository(private val context: Context) {
         )
 
         val events = mutableListOf<CalendarEvent>()
-        try {
-            context.contentResolver.query(
-                uriBuilder.build(),
-                projection,
-                null,
-                null,
-                "${CalendarContract.Instances.BEGIN} ASC"
-            )?.use { cursor ->
-                val eventIdIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_ID)
-                val calIdIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.CALENDAR_ID)
-                val titleIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
-                val descIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.DESCRIPTION)
-                val locIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_LOCATION)
-                val beginIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.BEGIN)
-                val endIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.END)
-                val allDayIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.ALL_DAY)
-                val colorIdx = cursor.getColumnIndexOrThrow(CalendarContract.Instances.DISPLAY_COLOR)
+        context.contentResolver.query(
+            uriBuilder.build(),
+            projection,
+            null,
+            null,
+            "${CalendarContract.Instances.BEGIN} ASC"
+        )?.use { cursor ->
+            val eventIdIdx = cursor.getColumnIndex(CalendarContract.Instances.EVENT_ID)
+            val calIdIdx = cursor.getColumnIndex(CalendarContract.Instances.CALENDAR_ID)
+            val titleIdx = cursor.getColumnIndex(CalendarContract.Instances.TITLE)
+            val descIdx = cursor.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
+            val locIdx = cursor.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+            val beginIdx = cursor.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val endIdx = cursor.getColumnIndex(CalendarContract.Instances.END)
+            val allDayIdx = cursor.getColumnIndex(CalendarContract.Instances.ALL_DAY)
+            val colorIdx = cursor.getColumnIndex(CalendarContract.Instances.DISPLAY_COLOR)
 
-                while (cursor.moveToNext()) {
-                    val calId = cursor.getLong(calIdIdx)
-                    val title = cursor.getString(titleIdx)?.takeIf { it.isNotBlank() } ?: "(Untitled Event)"
-                    events.add(
-                        CalendarEvent(
-                            id = cursor.getLong(eventIdIdx),
-                            calendarId = calId,
-                            calendarName = calendarNamesById[calId] ?: "Google Calendar",
-                            title = title,
-                            description = cursor.getString(descIdx) ?: "",
-                            location = cursor.getString(locIdx) ?: "",
-                            startMillis = cursor.getLong(beginIdx),
-                            endMillis = cursor.getLong(endIdx),
-                            allDay = cursor.getInt(allDayIdx) == 1,
-                            colorInt = cursor.getInt(colorIdx)
-                        )
+            if (eventIdIdx < 0 || calIdIdx < 0 || beginIdx < 0 || endIdx < 0) return events
+
+            while (cursor.moveToNext()) {
+                val calId = cursor.getLong(calIdIdx)
+                val title = (if (titleIdx >= 0) cursor.getString(titleIdx) else null)
+                    ?.takeIf { it.isNotBlank() } ?: "(Untitled Event)"
+                events.add(
+                    CalendarEvent(
+                        id = cursor.getLong(eventIdIdx),
+                        calendarId = calId,
+                        calendarName = calendarNamesById[calId] ?: "Google Calendar",
+                        title = title,
+                        description = if (descIdx >= 0) cursor.getString(descIdx) ?: "" else "",
+                        location = if (locIdx >= 0) cursor.getString(locIdx) ?: "" else "",
+                        startMillis = cursor.getLong(beginIdx),
+                        endMillis = cursor.getLong(endIdx),
+                        allDay = if (allDayIdx >= 0) cursor.getInt(allDayIdx) == 1 else false,
+                        colorInt = if (colorIdx >= 0) cursor.getInt(colorIdx) else 0xFF6A1B9A.toInt()
                     )
-                }
+                )
             }
-        } catch (_: SecurityException) {
-            return@withContext emptyList()
         }
-        events
+        return events
+    }
+
+    private suspend fun <T> retryOnTransientProviderError(block: () -> T): T {
+        var lastError: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                return block()
+            } catch (sec: SecurityException) {
+                throw sec
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt == 0) delay(350L)
+            }
+        }
+        throw lastError ?: IllegalStateException("Calendar provider query failed")
     }
 
     /**

@@ -14,9 +14,22 @@ import java.time.LocalDate
 import java.time.Month
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+
+sealed interface CalendarSyncStatus {
+    data object Idle : CalendarSyncStatus
+    data object Syncing : CalendarSyncStatus
+    data class Synced(
+        val calendarCount: Int,
+        val eventCount: Int,
+        val syncedAtMillis: Long
+    ) : CalendarSyncStatus
+    data object PermissionMissing : CalendarSyncStatus
+    data class Error(val message: String) : CalendarSyncStatus
+}
 
 data class DeviceCalendar(
     val id: Long,
@@ -41,7 +54,8 @@ data class CalendarEvent(
     val isSamplePreview: Boolean = false
 ) {
     fun dateEpochDay(zoneId: ZoneId = ZoneId.systemDefault()): Long {
-        return Instant.ofEpochMilli(startMillis).atZone(zoneId).toLocalDate().toEpochDay()
+        val effectiveZone = if (allDay) ZoneOffset.UTC else zoneId
+        return Instant.ofEpochMilli(startMillis).atZone(effectiveZone).toLocalDate().toEpochDay()
     }
 
     fun startMinutesOfDay(zoneId: ZoneId = ZoneId.systemDefault()): Int {
@@ -100,6 +114,8 @@ object PlannerAggregator {
         visibleCalendarIds: Set<Long>?,
         buildingFilterId: Long? = null,
         employeeFilterId: Long? = null,
+        includeShifts: Boolean = true,
+        selectedShiftEmployeeIds: Set<Long>? = null,
         contactsWithBirthdays: List<ContactEntity> = emptyList(),
         birthdayYears: List<Int> = listOf(LocalDate.now().year - 1, LocalDate.now().year, LocalDate.now().year + 1),
         zoneId: ZoneId = ZoneId.systemDefault()
@@ -162,33 +178,36 @@ object PlannerAggregator {
                 )
             }
 
-        shifts
-            .filter { buildingFilterId == null || it.buildingId == buildingFilterId }
-            .filter { employeeFilterId == null || it.employeeId == employeeFilterId }
-            .forEach { shift ->
-                val bldg = buildingsById[shift.buildingId]
-                val emp = employeeNamesById[shift.employeeId] ?: "Team Member"
-                items.add(
-                    UnifiedPlannerItem(
-                        id = "shift_${shift.id}",
-                        source = PlannerItemSource.SHIFT,
-                        title = "$emp — ${bldg?.name ?: "Building"}",
-                        subtitle = listOfNotNull(
-                            shift.stationOrRole.takeIf { it.isNotBlank() },
-                            shift.status.displayLabel
-                        ).joinToString(" • "),
-                        dateEpochDay = shift.dateEpochDay,
-                        startMinutes = if (shift.isFlexibleHours) null else shift.startMinutes,
-                        endMinutes = if (shift.isFlexibleHours) null else shift.endMinutes,
-                        allDay = shift.isFlexibleHours,
-                        accentColorHex = bldg?.colorHex ?: 0xFF1A5F6BL,
-                        customTimeLabel = WonderlandTimeFormat.formatShiftSchedule(shift),
-                        buildingId = shift.buildingId,
-                        employeeId = shift.employeeId,
-                        shiftEntity = shift
+        if (includeShifts) {
+            shifts
+                .filter { buildingFilterId == null || it.buildingId == buildingFilterId }
+                .filter { employeeFilterId == null || it.employeeId == employeeFilterId }
+                .filter { selectedShiftEmployeeIds == null || it.employeeId in selectedShiftEmployeeIds }
+                .forEach { shift ->
+                    val bldg = buildingsById[shift.buildingId]
+                    val emp = employeeNamesById[shift.employeeId] ?: "Team Member"
+                    items.add(
+                        UnifiedPlannerItem(
+                            id = "shift_${shift.id}",
+                            source = PlannerItemSource.SHIFT,
+                            title = "$emp — ${bldg?.name ?: "Building"}",
+                            subtitle = listOfNotNull(
+                                shift.stationOrRole.takeIf { it.isNotBlank() },
+                                shift.status.displayLabel
+                            ).joinToString(" • "),
+                            dateEpochDay = shift.dateEpochDay,
+                            startMinutes = if (shift.isFlexibleHours) null else shift.startMinutes,
+                            endMinutes = if (shift.isFlexibleHours) null else shift.endMinutes,
+                            allDay = shift.isFlexibleHours,
+                            accentColorHex = bldg?.colorHex ?: 0xFF1A5F6BL,
+                            customTimeLabel = WonderlandTimeFormat.formatShiftSchedule(shift),
+                            buildingId = shift.buildingId,
+                            employeeId = shift.employeeId,
+                            shiftEntity = shift
+                        )
                     )
-                )
-            }
+                }
+        }
 
         contactsWithBirthdays
             .filter { it.birthdayMonth != null && it.birthdayDay != null }
@@ -250,6 +269,11 @@ object WonderlandTimeFormat {
     private val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.getDefault())
     private val fullDateFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())
     private val monthYearFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
+    private val timestampFormatter = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.getDefault())
+
+    fun formatTimestamp(millis: Long, zoneId: ZoneId = ZoneId.systemDefault()): String {
+        return Instant.ofEpochMilli(millis).atZone(zoneId).format(timestampFormatter)
+    }
 
     fun formatMinutes(minutes: Int): String {
         val clamped = minutes.coerceIn(0, 24 * 60 - 1)

@@ -1,6 +1,9 @@
 package com.wonderland.taschasplanner.ui.navigation
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -24,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wonderland.taschasplanner.data.local.BuildingEntity
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
@@ -51,11 +57,12 @@ import com.wonderland.taschasplanner.ui.contacts.ContactsScreen
 import com.wonderland.taschasplanner.ui.planner.PlannerScreen
 import com.wonderland.taschasplanner.ui.settings.SettingsScreen
 import com.wonderland.taschasplanner.ui.today.TodayScreen
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 enum class WonderlandDestination(val label: String, val icon: ImageVector) {
-    TODAY("Today", Icons.Outlined.AutoAwesome),
     PLANNER("Planner", Icons.Outlined.CalendarMonth),
+    TODAY("Today", Icons.Outlined.AutoAwesome),
     BUILDINGS("Buildings", Icons.Outlined.Apartment),
     COMP_TIME("Comp", Icons.Outlined.AccessTime),
     CONTACTS("Contacts", Icons.Outlined.Contacts),
@@ -73,11 +80,42 @@ fun WonderlandApp(
     val updateManifestUrl by viewModel.updateManifestUrl.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
+    val calendarSyncStatus by viewModel.calendarSyncStatus.collectAsState()
+    val lastAutoBackupAtMillis by viewModel.lastAutoBackupAtMillis.collectAsState()
+    val autoRecoveryMessage by viewModel.autoRecoveryMessage.collectAsState()
+    val showShiftsInMonthView by viewModel.showShiftsInMonthView.collectAsState()
+    val selectedShiftEmployeeIds by viewModel.selectedShiftEmployeeIds.collectAsState()
+
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
-    var currentDest by remember { mutableStateOf(WonderlandDestination.TODAY) }
+    // Re-sync calendars, check permissions/rollover on resume; flush safety backup on stop
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.onAppResumed()
+                Lifecycle.Event.ON_STOP -> viewModel.onAppStopped()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Default directly to the Full Month Planner main view
+    var currentDest by remember { mutableStateOf(WonderlandDestination.PLANNER) }
     var focusedBuildingId by remember { mutableStateOf<Long?>(null) }
+
+    val openAppSettings: () -> Unit = {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null)
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
 
     val exportBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -122,6 +160,7 @@ fun WonderlandApp(
 
     var showShiftDialog by remember { mutableStateOf(false) }
     var editingShift by remember { mutableStateOf<ShiftScheduleEntity?>(null) }
+    var shiftDefaultDate by remember { mutableStateOf(LocalDate.now()) }
 
     var showBuildingDialog by remember { mutableStateOf(false) }
     var editingBuilding by remember { mutableStateOf<BuildingEntity?>(null) }
@@ -133,7 +172,16 @@ fun WonderlandApp(
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        viewModel.refreshCalendars()
+        viewModel.refreshCalendars(forceSync = true)
+    }
+
+    val requestCalendarPermissions: () -> Unit = {
+        calendarPermissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.READ_CALENDAR,
+                Manifest.permission.WRITE_CALENDAR
+            )
+        )
     }
 
     val useNavRail = widthSizeClass != WindowWidthSizeClass.Compact
@@ -142,6 +190,47 @@ fun WonderlandApp(
     val screenContent: @Composable (Modifier) -> Unit = { mod ->
         Box(modifier = mod) {
             when (currentDest) {
+                WonderlandDestination.PLANNER -> PlannerScreen(
+                    state = state,
+                    calendarSyncStatus = calendarSyncStatus,
+                    showShiftsInMonthView = showShiftsInMonthView,
+                    selectedShiftEmployeeIds = selectedShiftEmployeeIds,
+                    isExpandedWidth = isExpanded,
+                    onSelectDate = viewModel::selectDate,
+                    onRefreshCalendars = { viewModel.refreshCalendars(forceSync = true) },
+                    onRequestCalendarPermission = requestCalendarPermissions,
+                    onOpenAppSettings = openAppSettings,
+                    onToggleShowShiftsInMonth = viewModel::setShowShiftsInMonthView,
+                    onSelectAllShiftEmployees = viewModel::selectAllShiftEmployees,
+                    onToggleShiftEmployee = { empId ->
+                        viewModel.toggleShiftEmployeeFilter(empId, state.employees.map { it.id })
+                    },
+                    onClearShiftEmployees = {
+                        viewModel.clearShiftEmployeeSelection()
+                    },
+                    onAddTask = { date ->
+                        editingTask = null
+                        taskDefaultDate = date
+                        showTaskDialog = true
+                    },
+                    onAddShift = { date ->
+                        editingShift = null
+                        shiftDefaultDate = date
+                        showShiftDialog = true
+                    },
+                    onEditTask = {
+                        editingTask = it
+                        taskDefaultDate = LocalDate.ofEpochDay(it.dueDateEpochDay)
+                        showTaskDialog = true
+                    },
+                    onCycleTaskStatus = viewModel::cycleTaskStatus,
+                    onEditShift = {
+                        editingShift = it
+                        shiftDefaultDate = LocalDate.ofEpochDay(it.dateEpochDay)
+                        showShiftDialog = true
+                    }
+                )
+
                 WonderlandDestination.TODAY -> TodayScreen(
                     state = state,
                     onToggleTheme = viewModel::toggleQuickTheme,
@@ -152,6 +241,7 @@ fun WonderlandApp(
                     },
                     onAddShift = {
                         editingShift = null
+                        shiftDefaultDate = LocalDate.now()
                         showShiftDialog = true
                     },
                     onEditTask = {
@@ -162,33 +252,12 @@ fun WonderlandApp(
                     onCycleTaskStatus = viewModel::cycleTaskStatus,
                     onEditShift = {
                         editingShift = it
+                        shiftDefaultDate = LocalDate.ofEpochDay(it.dateEpochDay)
                         showShiftDialog = true
                     },
                     onOpenBuilding = { bldgId ->
                         focusedBuildingId = bldgId
                         currentDest = WonderlandDestination.BUILDINGS
-                    }
-                )
-
-                WonderlandDestination.PLANNER -> PlannerScreen(
-                    state = state,
-                    isExpandedWidth = isExpanded,
-                    onSelectDate = viewModel::selectDate,
-                    onRefreshCalendars = viewModel::refreshCalendars,
-                    onAddTask = { date ->
-                        editingTask = null
-                        taskDefaultDate = date
-                        showTaskDialog = true
-                    },
-                    onEditTask = {
-                        editingTask = it
-                        taskDefaultDate = LocalDate.ofEpochDay(it.dueDateEpochDay)
-                        showTaskDialog = true
-                    },
-                    onCycleTaskStatus = viewModel::cycleTaskStatus,
-                    onEditShift = {
-                        editingShift = it
-                        showShiftDialog = true
                     }
                 )
 
@@ -205,10 +274,12 @@ fun WonderlandApp(
                     },
                     onAddShift = {
                         editingShift = null
+                        shiftDefaultDate = state.selectedDate
                         showShiftDialog = true
                     },
                     onEditShift = {
                         editingShift = it
+                        shiftDefaultDate = LocalDate.ofEpochDay(it.dateEpochDay)
                         showShiftDialog = true
                     },
                     onCycleShiftStatus = viewModel::cycleShiftStatus,
@@ -254,19 +325,16 @@ fun WonderlandApp(
 
                 WonderlandDestination.SETTINGS -> SettingsScreen(
                     state = state,
+                    calendarSyncStatus = calendarSyncStatus,
+                    lastAutoBackupAtMillis = lastAutoBackupAtMillis,
+                    autoRecoveryMessage = autoRecoveryMessage,
                     updateManifestUrl = updateManifestUrl,
                     updateState = updateState,
                     backupStatusMessage = backupStatusMessage,
                     onSelectTheme = viewModel::setThemeMode,
-                    onRequestCalendarPermission = {
-                        calendarPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.READ_CALENDAR,
-                                Manifest.permission.WRITE_CALENDAR
-                            )
-                        )
-                    },
-                    onRefreshCalendars = viewModel::refreshCalendars,
+                    onRequestCalendarPermission = requestCalendarPermissions,
+                    onOpenAppSettings = openAppSettings,
+                    onRefreshCalendars = { viewModel.refreshCalendars(forceSync = true) },
                     onToggleCalendarVisibility = viewModel::setCalendarVisibility,
                     onToggleSampleCalendarPreview = viewModel::setShowSampleCalendarPreview,
                     onUpdateManifestUrlChange = viewModel::setUpdateManifestUrl,
@@ -360,7 +428,7 @@ fun WonderlandApp(
         val matchingShifts = editingShift?.let { ScheduleBatchMatcher.matchingShifts(it, state.shifts) }.orEmpty()
         ShiftEditorDialog(
             initial = editingShift,
-            defaultDate = state.selectedDate,
+            defaultDate = shiftDefaultDate,
             buildings = state.buildings,
             employees = state.employees,
             matchingCount = matchingShifts.size.coerceAtLeast(1),

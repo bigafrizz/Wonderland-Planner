@@ -81,6 +81,7 @@ abstract class WonderlandDatabase : RoomDatabase() {
                     WonderlandDatabase::class.java,
                     "wonderland_planner.db"
                 )
+                    .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }

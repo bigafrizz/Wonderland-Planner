@@ -1,5 +1,6 @@
 package com.wonderland.taschasplanner.ui
 
+import android.database.ContentObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,11 +14,14 @@ import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.ThemeMode
 import com.wonderland.taschasplanner.data.model.CalendarEvent
+import com.wonderland.taschasplanner.data.model.CalendarSyncStatus
 import com.wonderland.taschasplanner.data.model.DeviceCalendar
 import com.wonderland.taschasplanner.data.repository.PlannerRepository
 import com.wonderland.taschasplanner.data.update.AppUpdateManager
 import com.wonderland.taschasplanner.data.update.RemoteAppVersion
 import com.wonderland.taschasplanner.data.update.UpdateCheckResult
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +60,10 @@ class WonderlandViewModel(
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(LocalDate.now())
+    private var lastKnownToday: LocalDate = LocalDate.now()
+    private var calendarObserver: ContentObserver? = null
+    private var observerRefreshJob: Job? = null
+
     private val _updateManifestUrl = MutableStateFlow(updateManager.getManifestUrl())
     val updateManifestUrl: StateFlow<String> = _updateManifestUrl.asStateFlow()
 
@@ -64,6 +72,19 @@ class WonderlandViewModel(
 
     private val _backupStatusMessage = MutableStateFlow<String?>(null)
     val backupStatusMessage: StateFlow<String?> = _backupStatusMessage.asStateFlow()
+
+    val calendarSyncStatus: StateFlow<CalendarSyncStatus> = repository.calendarSyncStatus
+    val lastAutoBackupAtMillis: StateFlow<Long?> = repository.lastAutoBackupAtMillis
+    val autoRecoveryMessage: StateFlow<String?> = repository.autoRecoveryMessage
+
+    val showShiftsInMonthView: StateFlow<Boolean> = repository.showShiftsInMonthView
+
+    /**
+     * Null means "All Employees" are shown when shifts are visible in the Full Month view.
+     * Non-null represents a specific multi-select set of employee IDs.
+     */
+    private val _selectedShiftEmployeeIds = MutableStateFlow<Set<Long>?>(null)
+    val selectedShiftEmployeeIds: StateFlow<Set<Long>?> = _selectedShiftEmployeeIds.asStateFlow()
 
     val compTimeEntries: StateFlow<List<CompTimeEntryEntity>> = repository.compTimeEntries.stateIn(
         scope = viewModelScope,
@@ -118,19 +139,108 @@ class WonderlandViewModel(
 
     init {
         viewModelScope.launch {
-            repository.ensureSeeded()
-            repository.refreshGoogleCalendars(_selectedDate.value)
+            repository.initializePersistenceAndSeed()
+            ensureCalendarObserverAttached()
+            repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
         }
+    }
+
+    /**
+     * Called on Activity ON_RESUME so overnight date rollovers, permission changes,
+     * and background Google Calendar syncs are always reflected immediately.
+     */
+    fun onAppResumed() {
+        val now = LocalDate.now()
+        if (now != lastKnownToday) {
+            if (_selectedDate.value == lastKnownToday) {
+                _selectedDate.value = now
+            }
+            lastKnownToday = now
+        }
+        ensureCalendarObserverAttached()
+        viewModelScope.launch {
+            repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
+        }
+    }
+
+    /**
+     * Called on Activity ON_STOP so any recent edits are flushed to the local rolling backup immediately.
+     */
+    fun onAppStopped() {
+        repository.flushAutoBackupNow()
+    }
+
+    private fun ensureCalendarObserverAttached() {
+        val hasPerm = repository.googleCalendarRepository.hasReadPermission()
+        if (!hasPerm) {
+            calendarObserver?.let {
+                repository.googleCalendarRepository.unregisterCalendarObserver(it)
+                calendarObserver = null
+            }
+            return
+        }
+        if (calendarObserver == null) {
+            calendarObserver = repository.googleCalendarRepository.registerCalendarObserver {
+                observerRefreshJob?.cancel()
+                observerRefreshJob = viewModelScope.launch {
+                    delay(800L)
+                    repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        observerRefreshJob?.cancel()
+        repository.googleCalendarRepository.unregisterCalendarObserver(calendarObserver)
+        calendarObserver = null
     }
 
     fun selectDate(date: LocalDate) {
         _selectedDate.value = date
+        if (repository.isDateNearEdgeOrOutsideLoadedRange(date)) {
+            viewModelScope.launch {
+                repository.refreshGoogleCalendars(date, forceSync = false)
+            }
+        }
     }
 
-    fun refreshCalendars() {
+    fun refreshCalendars(forceSync: Boolean = true) {
+        ensureCalendarObserverAttached()
         viewModelScope.launch {
-            repository.refreshGoogleCalendars(_selectedDate.value)
+            repository.refreshGoogleCalendars(_selectedDate.value, forceSync = forceSync)
         }
+    }
+
+    fun setShowShiftsInMonthView(show: Boolean) {
+        repository.setShowShiftsInMonthView(show)
+    }
+
+    fun selectAllShiftEmployees() {
+        _selectedShiftEmployeeIds.value = null
+    }
+
+    fun clearShiftEmployeeSelection() {
+        _selectedShiftEmployeeIds.value = emptySet()
+    }
+
+    fun toggleShiftEmployeeFilter(employeeId: Long, allEmployeeIds: List<Long>) {
+        val current = _selectedShiftEmployeeIds.value
+        val next = if (current == null) {
+            // Transitioning from "All" -> uncheck just this employee
+            allEmployeeIds.filter { it != employeeId }.toSet()
+        } else if (employeeId in current) {
+            current - employeeId
+        } else {
+            val added = current + employeeId
+            if (allEmployeeIds.isNotEmpty() && allEmployeeIds.all { it in added }) {
+                null // All selected -> normalize back to All
+            } else {
+                added
+            }
+        }
+        _selectedShiftEmployeeIds.value = next
     }
 
     fun setThemeMode(mode: ThemeMode) = repository.setThemeMode(mode)
@@ -138,7 +248,7 @@ class WonderlandViewModel(
 
     fun setShowSampleCalendarPreview(enabled: Boolean) {
         repository.setShowSampleCalendarPreview(enabled)
-        refreshCalendars()
+        refreshCalendars(forceSync = false)
     }
 
     fun setCalendarVisibility(calendarId: Long, visible: Boolean) {
@@ -161,7 +271,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             repository.saveContact(contact, pushBirthdayCalendarId, buildingName)
             if (pushBirthdayCalendarId != null || contact.linkedBirthdayEventId != null) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -170,7 +280,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             repository.deleteContact(contact)
             if (contact.linkedBirthdayEventId != null) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -190,7 +300,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             repository.saveTask(task, pushToCalendarId, buildingName, extraDetails)
             if (pushToCalendarId != null || task.linkedCalendarEventId != null) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -205,7 +315,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             repository.saveTasksForDates(template, dates, pushToCalendarId, buildingName, extraDetails)
             if (pushToCalendarId != null || template.linkedCalendarEventId != null) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -218,7 +328,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             repository.deleteTask(task)
             if (task.linkedCalendarEventId != null) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -229,7 +339,7 @@ class WonderlandViewModel(
             val hadSynced = tasks.any { it.linkedCalendarEventId != null }
             repository.deleteTasks(tasks)
             if (hadSynced) {
-                repository.refreshGoogleCalendars(_selectedDate.value)
+                repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
         }
     }
@@ -293,6 +403,7 @@ class WonderlandViewModel(
         viewModelScope.launch {
             runCatching {
                 val restored = backupManager.restoreFromJson(jsonString)
+                repository.onBackupRestored()
                 "Restored ${restored.buildings.size} buildings, ${restored.contacts.size} contacts, ${restored.tasks.size} tasks, and ${restored.shifts.size} shifts."
             }.onSuccess { msg ->
                 _backupStatusMessage.value = msg

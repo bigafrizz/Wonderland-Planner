@@ -43,6 +43,9 @@ interface ContactDao {
     @Query("SELECT * FROM contacts ORDER BY id ASC")
     suspend fun getAllContactsOnce(): List<ContactEntity>
 
+    @Query("SELECT COUNT(*) FROM contacts")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM contacts WHERE type = :type ORDER BY isFavorite DESC, fullName ASC")
     fun observeContactsByType(type: ContactType): Flow<List<ContactEntity>>
 
@@ -66,6 +69,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks ORDER BY id ASC")
     suspend fun getAllTasksOnce(): List<TaskEntity>
+
+    @Query("SELECT COUNT(*) FROM tasks")
+    suspend fun count(): Int
 
     @Query("SELECT * FROM tasks WHERE dueDateEpochDay BETWEEN :startEpochDay AND :endEpochDay ORDER BY dueDateEpochDay ASC, startTimeMinutes ASC")
     fun observeTasksInRange(startEpochDay: Long, endEpochDay: Long): Flow<List<TaskEntity>>
@@ -91,6 +97,9 @@ interface ShiftScheduleDao {
     @Query("SELECT * FROM shift_schedules ORDER BY id ASC")
     suspend fun getAllShiftsOnce(): List<ShiftScheduleEntity>
 
+    @Query("SELECT COUNT(*) FROM shift_schedules")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM shift_schedules WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay ORDER BY dateEpochDay ASC, startMinutes ASC")
     fun observeShiftsInRange(startEpochDay: Long, endEpochDay: Long): Flow<List<ShiftScheduleEntity>>
 
@@ -112,8 +121,20 @@ interface CalendarPrefDao {
     @Query("SELECT * FROM calendar_prefs ORDER BY displayName ASC")
     fun observeCalendarPrefs(): Flow<List<CalendarPrefEntity>>
 
+    @Query("SELECT * FROM calendar_prefs")
+    suspend fun getAllPrefsOnce(): List<CalendarPrefEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun upsertAll(prefs: List<CalendarPrefEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertReplacing(prefs: List<CalendarPrefEntity>)
+
+    @Query("DELETE FROM calendar_prefs WHERE calendarId NOT IN (:activeIds)")
+    suspend fun deleteStaleNotIn(activeIds: List<Long>)
+
+    @Query("DELETE FROM calendar_prefs")
+    suspend fun deleteAll()
 
     @Query("UPDATE calendar_prefs SET isVisible = :isVisible WHERE calendarId = :calendarId")
     suspend fun setVisibility(calendarId: Long, isVisible: Boolean)
@@ -126,6 +147,9 @@ interface CompTimeDao {
 
     @Query("SELECT * FROM comp_time_entries ORDER BY id ASC")
     suspend fun getAllEntriesOnce(): List<CompTimeEntryEntity>
+
+    @Query("SELECT COUNT(*) FROM comp_time_entries")
+    suspend fun count(): Int
 
     @Query("SELECT * FROM comp_time_entries WHERE dateEpochDay = :epochDay AND entryType = 'WORK_DAY' ORDER BY id DESC LIMIT 1")
     suspend fun getWorkEntryForDate(epochDay: Long): CompTimeEntryEntity?

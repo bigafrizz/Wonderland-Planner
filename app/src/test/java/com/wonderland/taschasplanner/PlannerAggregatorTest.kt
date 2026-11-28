@@ -235,4 +235,64 @@ class PlannerAggregatorTest {
         assertEquals(LocalDate.of(2026, 2, 28).toEpochDay(), unified[0].dateEpochDay)
         assertEquals(LocalDate.of(2028, 2, 29).toEpochDay(), unified[1].dateEpochDay)
     }
+
+    @Test
+    fun hidesAllShiftsOrFiltersByMultiSelectEmployeesWhileKeepingOtherItems() {
+        val gcalEvent = CalendarEvent(
+            id = 50L,
+            calendarId = 5L,
+            calendarName = "Work Cal",
+            title = "Team Meeting",
+            startMillis = today.atTime(10, 0).toInstant(ZoneOffset.UTC).toEpochMilli(),
+            endMillis = today.atTime(11, 0).toInstant(ZoneOffset.UTC).toEpochMilli()
+        )
+        val task = TaskEntity(id = 1L, title = "Inspect Lobby", buildingId = manor.id, dueDateEpochDay = todayEpoch)
+        val aliceShift = ShiftScheduleEntity(id = 2L, employeeId = 10L, buildingId = manor.id, dateEpochDay = todayEpoch)
+        val bobShift = ShiftScheduleEntity(id = 3L, employeeId = 11L, buildingId = teaHouse.id, dateEpochDay = todayEpoch)
+
+        // Hide all shifts -> tasks and calendar events remain
+        val hiddenShifts = PlannerAggregator.buildUnifiedItems(
+            tasks = listOf(task),
+            shifts = listOf(aliceShift, bobShift),
+            calendarEvents = listOf(gcalEvent),
+            buildingsById = mapOf(manor.id to manor, teaHouse.id to teaHouse),
+            employeeNamesById = mapOf(10L to "Alice", 11L to "Bob"),
+            visibleCalendarIds = setOf(5L),
+            includeShifts = false,
+            zoneId = ZoneOffset.UTC
+        )
+        assertEquals(2, hiddenShifts.size)
+        assertEquals(0, hiddenShifts.count { it.source == PlannerItemSource.SHIFT })
+
+        // Multi-select only Alice -> Alice's shift + task + calendar event remain; Bob's shift hidden
+        val aliceOnly = PlannerAggregator.buildUnifiedItems(
+            tasks = listOf(task),
+            shifts = listOf(aliceShift, bobShift),
+            calendarEvents = listOf(gcalEvent),
+            buildingsById = mapOf(manor.id to manor, teaHouse.id to teaHouse),
+            employeeNamesById = mapOf(10L to "Alice", 11L to "Bob"),
+            visibleCalendarIds = setOf(5L),
+            includeShifts = true,
+            selectedShiftEmployeeIds = setOf(10L),
+            zoneId = ZoneOffset.UTC
+        )
+        assertEquals(3, aliceOnly.size)
+        assertEquals(listOf(10L), aliceOnly.filter { it.source == PlannerItemSource.SHIFT }.map { it.employeeId })
+    }
+
+    @Test
+    fun allDayCalendarEventsStayOnUtcDateInNegativeOffsetTimezones() {
+        val utcMidnight = LocalDate.of(2026, 11, 27).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val allDayEvent = CalendarEvent(
+            id = 88L,
+            calendarId = 5L,
+            calendarName = "Holidays",
+            title = "All-Day Event",
+            startMillis = utcMidnight,
+            endMillis = utcMidnight + 86_400_000L,
+            allDay = true
+        )
+        val chicagoZone = java.time.ZoneId.of("America/Chicago")
+        assertEquals(LocalDate.of(2026, 11, 27).toEpochDay(), allDayEvent.dateEpochDay(chicagoZone))
+    }
 }
