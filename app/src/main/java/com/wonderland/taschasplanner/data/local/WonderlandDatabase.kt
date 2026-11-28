@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TaskEntity::class,
         ShiftScheduleEntity::class,
         CalendarPrefEntity::class,
-        CompTimeEntryEntity::class
+        CompTimeEntryEntity::class,
+        NoteTodoEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 @TypeConverters(WonderlandTypeConverters::class)
@@ -28,6 +29,7 @@ abstract class WonderlandDatabase : RoomDatabase() {
     abstract fun shiftScheduleDao(): ShiftScheduleDao
     abstract fun calendarPrefDao(): CalendarPrefDao
     abstract fun compTimeDao(): CompTimeDao
+    abstract fun noteTodoDao(): NoteTodoDao
 
     companion object {
         @Volatile
@@ -74,6 +76,33 @@ abstract class WonderlandDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `note_todos` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `header` TEXT NOT NULL,
+                        `body` TEXT NOT NULL,
+                        `createdAtMillis` INTEGER NOT NULL,
+                        `updatedAtMillis` INTEGER NOT NULL,
+                        `isCompleted` INTEGER NOT NULL,
+                        `completedAtMillis` INTEGER,
+                        `isPinned` INTEGER NOT NULL,
+                        `accentColorHex` INTEGER NOT NULL,
+                        `linkedTaskId` INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_note_todos_isCompleted` ON `note_todos` (`isCompleted`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_note_todos_updatedAtMillis` ON `note_todos` (`updatedAtMillis`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): WonderlandDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -82,7 +111,7 @@ abstract class WonderlandDatabase : RoomDatabase() {
                     "wonderland_planner.db"
                 )
                     .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { INSTANCE = it }
             }

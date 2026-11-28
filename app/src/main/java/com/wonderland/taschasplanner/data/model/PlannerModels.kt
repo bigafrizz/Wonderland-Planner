@@ -270,9 +270,14 @@ object WonderlandTimeFormat {
     private val fullDateFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())
     private val monthYearFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
     private val timestampFormatter = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.getDefault())
+    private val noteTimestampFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy • h:mm a", Locale.getDefault())
 
     fun formatTimestamp(millis: Long, zoneId: ZoneId = ZoneId.systemDefault()): String {
         return Instant.ofEpochMilli(millis).atZone(zoneId).format(timestampFormatter)
+    }
+
+    fun formatNoteTimestamp(millis: Long, zoneId: ZoneId = ZoneId.systemDefault()): String {
+        return Instant.ofEpochMilli(millis).atZone(zoneId).format(noteTimestampFormatter)
     }
 
     fun formatMinutes(minutes: Int): String {

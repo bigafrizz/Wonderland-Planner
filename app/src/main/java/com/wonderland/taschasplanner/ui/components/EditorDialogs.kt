@@ -69,14 +69,16 @@ fun TaskEditorDialog(
     writableCalendars: List<DeviceCalendar>,
     defaultCalendarId: Long?,
     matchingCount: Int = 1,
+    prefillTitle: String = "",
+    prefillDescription: String = "",
     onDismiss: () -> Unit,
     onSave: (TaskEntity, List<LocalDate>, Long?) -> Unit,
     onDelete: ((TaskEntity) -> Unit)? = null,
     onDeleteMatching: ((TaskEntity) -> Unit)? = null
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var title by remember { mutableStateOf(initial?.title ?: "") }
-    var description by remember { mutableStateOf(initial?.description ?: "") }
+    var title by remember { mutableStateOf(initial?.title ?: prefillTitle) }
+    var description by remember { mutableStateOf(initial?.description ?: prefillDescription) }
     var roomOrZone by remember { mutableStateOf(initial?.roomOrZone ?: "") }
     var selectedEmployeeId by remember { mutableStateOf(initial?.assignedEmployeeId ?: employees.firstOrNull()?.id) }
     var selectedCustomerId by remember { mutableStateOf(initial?.customerId) }

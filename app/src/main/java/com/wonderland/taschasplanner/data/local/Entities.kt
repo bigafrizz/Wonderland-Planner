@@ -206,6 +206,23 @@ data class CompTimeEntryEntity(
     val notes: String = ""
 )
 
+@Entity(
+    tableName = "note_todos",
+    indices = [Index("isCompleted"), Index("updatedAtMillis")]
+)
+data class NoteTodoEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val header: String,
+    val body: String = "",
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+    val isCompleted: Boolean = false,
+    val completedAtMillis: Long? = null,
+    val isPinned: Boolean = false,
+    val accentColorHex: Long = 0xFF6A1B9AL,
+    val linkedTaskId: Long? = null
+)
+
 class WonderlandTypeConverters {
     @TypeConverter fun fromContactType(v: ContactType): String = v.name
     @TypeConverter fun toContactType(v: String): ContactType = ContactType.valueOf(v)

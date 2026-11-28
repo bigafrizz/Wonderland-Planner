@@ -10,6 +10,7 @@ import com.wonderland.taschasplanner.data.local.CalendarPrefEntity
 import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
+import com.wonderland.taschasplanner.data.local.NoteTodoEntity
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.local.ThemeMode
@@ -87,6 +88,11 @@ class WonderlandViewModel(
     val selectedShiftEmployeeIds: StateFlow<Set<Long>?> = _selectedShiftEmployeeIds.asStateFlow()
 
     val compTimeEntries: StateFlow<List<CompTimeEntryEntity>> = repository.compTimeEntries.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
+    val noteTodos: StateFlow<List<NoteTodoEntity>> = repository.noteTodos.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
@@ -310,10 +316,14 @@ class WonderlandViewModel(
         dates: List<LocalDate>,
         pushToCalendarId: Long? = null,
         buildingName: String = "",
-        extraDetails: String = ""
+        extraDetails: String = "",
+        sourceNote: NoteTodoEntity? = null
     ) {
         viewModelScope.launch {
-            repository.saveTasksForDates(template, dates, pushToCalendarId, buildingName, extraDetails)
+            val savedTaskId = repository.saveTasksForDates(template, dates, pushToCalendarId, buildingName, extraDetails)
+            if (sourceNote != null && savedTaskId != null) {
+                repository.markNoteTodoLinkedToTask(sourceNote, savedTaskId)
+            }
             if (pushToCalendarId != null || template.linkedCalendarEventId != null) {
                 repository.refreshGoogleCalendars(_selectedDate.value, forceSync = false)
             }
@@ -382,6 +392,44 @@ class WonderlandViewModel(
             val nowMinutes = now.hour * 60 + now.minute
             repository.clockInOrOutToday(nowMinutes)
         }
+    }
+
+    // --- Notes / To-Do ---
+    fun createNoteTodo(
+        header: String = "",
+        body: String = "",
+        accentColorHex: Long = 0xFF6A1B9AL,
+        onCreated: (Long) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val id = repository.saveNoteTodo(
+                NoteTodoEntity(
+                    header = header,
+                    body = body,
+                    createdAtMillis = now,
+                    updatedAtMillis = now,
+                    accentColorHex = accentColorHex
+                )
+            )
+            onCreated(id)
+        }
+    }
+
+    fun saveNoteTodo(note: NoteTodoEntity) {
+        viewModelScope.launch { repository.saveNoteTodo(note) }
+    }
+
+    fun toggleNoteTodoCompleted(note: NoteTodoEntity) {
+        viewModelScope.launch { repository.toggleNoteTodoCompleted(note) }
+    }
+
+    fun toggleNoteTodoPinned(note: NoteTodoEntity) {
+        viewModelScope.launch { repository.toggleNoteTodoPinned(note) }
+    }
+
+    fun deleteNoteTodo(note: NoteTodoEntity) {
+        viewModelScope.launch { repository.deleteNoteTodo(note) }
     }
 
     fun loadSampleData() {

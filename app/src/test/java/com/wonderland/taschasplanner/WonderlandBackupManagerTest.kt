@@ -6,6 +6,7 @@ import com.wonderland.taschasplanner.data.backup.WonderlandBackupSnapshot
 import com.wonderland.taschasplanner.data.local.BuildingEntity
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
+import com.wonderland.taschasplanner.data.local.NoteTodoEntity
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import org.junit.Assert.assertEquals
@@ -52,6 +53,20 @@ class WonderlandBackupManagerTest {
                     breakMinutes = 30,
                     notes = "Late event setup"
                 )
+            ),
+            noteTodos = listOf(
+                NoteTodoEntity(
+                    id = 400L,
+                    header = "Order holiday lights for Main Manor",
+                    body = "Check warm white strands and extension cords before Friday.",
+                    createdAtMillis = 1_700_000_000_000L,
+                    updatedAtMillis = 1_700_000_100_000L,
+                    isCompleted = true,
+                    completedAtMillis = 1_700_000_100_000L,
+                    isPinned = true,
+                    accentColorHex = 0xFF1A5F6BL,
+                    linkedTaskId = 100L
+                )
             )
         )
 
@@ -69,6 +84,29 @@ class WonderlandBackupManagerTest {
         assertEquals(4.5, decoded.shifts.first().allocatedHours, 0.001)
         assertEquals(1, decoded.compTimeEntries.size)
         assertEquals("Late event setup", decoded.compTimeEntries.first().notes)
+        assertEquals(1, decoded.noteTodos.size)
+        assertEquals("Order holiday lights for Main Manor", decoded.noteTodos.first().header)
+        assertTrue(decoded.noteTodos.first().isCompleted)
+        assertTrue(decoded.noteTodos.first().isPinned)
+        assertEquals(100L, decoded.noteTodos.first().linkedTaskId)
+    }
+
+    @Test
+    fun decodesLegacyV3BackupWithoutNoteTodosArray() {
+        val legacyJson = """
+            {
+              "schemaVersion": 3,
+              "exportedAtMillis": 1700000000000,
+              "buildings": [{ "id": 1, "name": "Main Manor", "code": "MNR" }],
+              "contacts": [],
+              "tasks": [],
+              "shifts": [],
+              "compTimeEntries": []
+            }
+        """.trimIndent()
+        val decoded = WonderlandBackupCodec.decode(legacyJson)
+        assertEquals(1, decoded.buildings.size)
+        assertTrue(decoded.noteTodos.isEmpty())
     }
 
     @Test

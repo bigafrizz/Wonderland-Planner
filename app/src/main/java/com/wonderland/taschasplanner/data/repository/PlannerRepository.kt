@@ -8,6 +8,7 @@ import com.wonderland.taschasplanner.data.local.CalendarPrefEntity
 import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
 import com.wonderland.taschasplanner.data.local.CompTimeEntryType
 import com.wonderland.taschasplanner.data.local.ContactEntity
+import com.wonderland.taschasplanner.data.local.NoteTodoEntity
 import com.wonderland.taschasplanner.data.local.RecurrenceRule
 import com.wonderland.taschasplanner.data.local.SampleDataSeeder
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
@@ -82,6 +83,7 @@ class PlannerRepository(
     val shifts: Flow<List<ShiftScheduleEntity>> = db.shiftScheduleDao().observeAllShifts()
     val calendarPrefs: Flow<List<CalendarPrefEntity>> = db.calendarPrefDao().observeCalendarPrefs()
     val compTimeEntries: Flow<List<CompTimeEntryEntity>> = db.compTimeDao().observeAllEntries()
+    val noteTodos: Flow<List<NoteTodoEntity>> = db.noteTodoDao().observeAllNotes()
 
     private val _dailyBaselineHours = MutableStateFlow(
         prefs.getFloat(KEY_COMP_BASELINE, 8.0f).toDouble()
@@ -173,6 +175,7 @@ class PlannerRepository(
     suspend fun clearAllLocalData() = withContext(appScope.coroutineContext + NonCancellable) {
         SampleDataSeeder.clearAllData(db)
         db.compTimeDao().deleteAll()
+        db.noteTodoDao().deleteAll()
         prefs.edit()
             .putBoolean(KEY_INITIAL_SEED_DONE, true)
             .putBoolean(KEY_USER_CLEARED_DATA, true)
@@ -337,16 +340,19 @@ class PlannerRepository(
         pushToCalendarId: Long? = null,
         locationName: String = "",
         extraDetails: String = ""
-    ) = withContext(appScope.coroutineContext + NonCancellable) {
+    ): Long? = withContext(appScope.coroutineContext + NonCancellable) {
         val uniqueDates = dates.distinct().sorted()
+        var firstSavedId: Long? = null
         uniqueDates.forEachIndexed { idx, date ->
             val taskForDay = template.copy(
                 id = if (idx == 0) template.id else 0L,
                 dueDateEpochDay = date.toEpochDay(),
                 linkedCalendarEventId = if (idx == 0) template.linkedCalendarEventId else null
             )
-            saveTask(taskForDay, pushToCalendarId, locationName, extraDetails)
+            val savedId = saveTask(taskForDay, pushToCalendarId, locationName, extraDetails)
+            if (idx == 0) firstSavedId = savedId
         }
+        firstSavedId
     }
 
     suspend fun deleteTask(task: TaskEntity) =
@@ -416,6 +422,69 @@ class PlannerRepository(
     suspend fun deleteCompTimeEntry(entry: CompTimeEntryEntity) =
         withContext(appScope.coroutineContext + NonCancellable) {
             db.compTimeDao().delete(entry)
+            autoBackupStore.scheduleSnapshot()
+        }
+
+    // --- Notes / To-Do ---
+    suspend fun saveNoteTodo(note: NoteTodoEntity): Long =
+        withContext(appScope.coroutineContext + NonCancellable) {
+            val now = System.currentTimeMillis()
+            val stamped = if (note.id == 0L) {
+                note.copy(
+                    createdAtMillis = if (note.createdAtMillis > 0L) note.createdAtMillis else now,
+                    updatedAtMillis = now
+                )
+            } else {
+                note.copy(updatedAtMillis = now)
+            }
+            val id = if (stamped.id == 0L) db.noteTodoDao().insert(stamped)
+            else {
+                db.noteTodoDao().update(stamped)
+                stamped.id
+            }
+            markUserHasData()
+            id
+        }
+
+    suspend fun toggleNoteTodoCompleted(note: NoteTodoEntity) =
+        withContext(appScope.coroutineContext + NonCancellable) {
+            val now = System.currentTimeMillis()
+            val nextCompleted = !note.isCompleted
+            db.noteTodoDao().update(
+                note.copy(
+                    isCompleted = nextCompleted,
+                    completedAtMillis = if (nextCompleted) now else null,
+                    updatedAtMillis = now
+                )
+            )
+            markUserHasData()
+        }
+
+    suspend fun toggleNoteTodoPinned(note: NoteTodoEntity) =
+        withContext(appScope.coroutineContext + NonCancellable) {
+            db.noteTodoDao().update(
+                note.copy(
+                    isPinned = !note.isPinned,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+            markUserHasData()
+        }
+
+    suspend fun markNoteTodoLinkedToTask(note: NoteTodoEntity, taskId: Long) =
+        withContext(appScope.coroutineContext + NonCancellable) {
+            db.noteTodoDao().update(
+                note.copy(
+                    linkedTaskId = taskId,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+            markUserHasData()
+        }
+
+    suspend fun deleteNoteTodo(note: NoteTodoEntity) =
+        withContext(appScope.coroutineContext + NonCancellable) {
+            db.noteTodoDao().delete(note)
             autoBackupStore.scheduleSnapshot()
         }
 

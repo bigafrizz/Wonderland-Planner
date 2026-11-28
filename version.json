@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.5.0",
-  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.5.0/app-debug.apk",
-  "releaseNotes": "Full Month view is now the main landing screen with a slide-up Daily Itinerary Card on day tap, added Show/Hide Shifts toggle with All/Multi-select employee dropdown, hardened overnight data persistence with Room TRUNCATE mode and automatic rolling local backup/recovery, and fixed overnight Google Calendar sync drops and reconnection."
+  "versionCode": 8,
+  "versionName": "1.6.0",
+  "apkUrl": "https://github.com/bigafrizz/Wonderland-Planner/releases/download/v1.6.0/app-debug.apk",
+  "releaseNotes": "Added a OneNote-style To-Do / Notes section on the left sidebar with automatic timestamps, editable headers, open freeform text with auto-save, strikethrough completion, color tags, pinning, Assign to Calendar task linking, and full backup/auto-recovery support."
 }

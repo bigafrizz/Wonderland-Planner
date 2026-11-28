@@ -7,15 +7,19 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Contacts
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +47,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wonderland.taschasplanner.data.local.BuildingEntity
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
+import com.wonderland.taschasplanner.data.local.NoteTodoEntity
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.TaskEntity
 import com.wonderland.taschasplanner.data.model.ScheduleBatchMatcher
@@ -54,6 +59,7 @@ import com.wonderland.taschasplanner.ui.components.ShiftEditorDialog
 import com.wonderland.taschasplanner.ui.components.TaskEditorDialog
 import com.wonderland.taschasplanner.ui.comptime.CompTimeScreen
 import com.wonderland.taschasplanner.ui.contacts.ContactsScreen
+import com.wonderland.taschasplanner.ui.notes.NotesScreen
 import com.wonderland.taschasplanner.ui.planner.PlannerScreen
 import com.wonderland.taschasplanner.ui.settings.SettingsScreen
 import com.wonderland.taschasplanner.ui.today.TodayScreen
@@ -63,6 +69,7 @@ import java.time.LocalDate
 enum class WonderlandDestination(val label: String, val icon: ImageVector) {
     PLANNER("Planner", Icons.Outlined.CalendarMonth),
     TODAY("Today", Icons.Outlined.AutoAwesome),
+    NOTES("Notes", Icons.Outlined.EditNote),
     BUILDINGS("Buildings", Icons.Outlined.Apartment),
     COMP_TIME("Comp", Icons.Outlined.AccessTime),
     CONTACTS("Contacts", Icons.Outlined.Contacts),
@@ -76,6 +83,7 @@ fun WonderlandApp(
 ) {
     val state by viewModel.uiState.collectAsState()
     val compTimeEntries by viewModel.compTimeEntries.collectAsState()
+    val noteTodos by viewModel.noteTodos.collectAsState()
     val dailyBaselineHours by viewModel.dailyBaselineHours.collectAsState()
     val updateManifestUrl by viewModel.updateManifestUrl.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
@@ -157,6 +165,9 @@ fun WonderlandApp(
     var showTaskDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskEntity?>(null) }
     var taskDefaultDate by remember { mutableStateOf(LocalDate.now()) }
+    var taskPrefillTitle by remember { mutableStateOf("") }
+    var taskPrefillDescription by remember { mutableStateOf("") }
+    var assigningSourceNote by remember { mutableStateOf<NoteTodoEntity?>(null) }
 
     var showShiftDialog by remember { mutableStateOf(false) }
     var editingShift by remember { mutableStateOf<ShiftScheduleEntity?>(null) }
@@ -261,6 +272,26 @@ fun WonderlandApp(
                     }
                 )
 
+                WonderlandDestination.NOTES -> NotesScreen(
+                    notes = noteTodos,
+                    isExpandedWidth = isExpanded,
+                    onCreateNote = { onCreated ->
+                        viewModel.createNoteTodo(onCreated = onCreated)
+                    },
+                    onSaveNote = viewModel::saveNoteTodo,
+                    onToggleCompleted = viewModel::toggleNoteTodoCompleted,
+                    onTogglePinned = viewModel::toggleNoteTodoPinned,
+                    onDeleteNote = viewModel::deleteNoteTodo,
+                    onAssignToCalendar = { note ->
+                        editingTask = null
+                        taskDefaultDate = state.selectedDate
+                        taskPrefillTitle = note.header.trim()
+                        taskPrefillDescription = note.body.trim()
+                        assigningSourceNote = note
+                        showTaskDialog = true
+                    }
+                )
+
                 WonderlandDestination.BUILDINGS -> BuildingsScreen(
                     state = state,
                     initialBuildingId = focusedBuildingId,
@@ -361,13 +392,15 @@ fun WonderlandApp(
                     .padding(innerPadding)
             ) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
-                    WonderlandDestination.entries.forEach { dest ->
-                        NavigationRailItem(
-                            selected = currentDest == dest,
-                            onClick = { currentDest = dest },
-                            icon = { Icon(dest.icon, contentDescription = dest.label) },
-                            label = { Text(dest.label) }
-                        )
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        WonderlandDestination.entries.forEach { dest ->
+                            NavigationRailItem(
+                                selected = currentDest == dest,
+                                onClick = { currentDest = dest },
+                                icon = { Icon(dest.icon, contentDescription = dest.label) },
+                                label = { Text(dest.label, maxLines = 1, softWrap = false) }
+                            )
+                        }
                     }
                 }
                 screenContent(Modifier.weight(1f).fillMaxSize())
@@ -383,7 +416,7 @@ fun WonderlandApp(
                             selected = currentDest == dest,
                             onClick = { currentDest = dest },
                             icon = { Icon(dest.icon, contentDescription = dest.label) },
-                            label = { Text(dest.label) }
+                            label = { Text(dest.label, maxLines = 1, softWrap = false) }
                         )
                     }
                 }
@@ -405,7 +438,14 @@ fun WonderlandApp(
             writableCalendars = state.deviceCalendars.filter { it.isWritable },
             defaultCalendarId = viewModel.lastPushCalendarId(),
             matchingCount = matchingTasks.size.coerceAtLeast(1),
-            onDismiss = { showTaskDialog = false },
+            prefillTitle = taskPrefillTitle,
+            prefillDescription = taskPrefillDescription,
+            onDismiss = {
+                showTaskDialog = false
+                taskPrefillTitle = ""
+                taskPrefillDescription = ""
+                assigningSourceNote = null
+            },
             onSave = { task, targetDates, pushCalId ->
                 val bldgName = task.buildingId?.let { state.buildingsById[it]?.name } ?: ""
                 val empName = task.assignedEmployeeId?.let { state.contactsById[it]?.fullName }
@@ -415,7 +455,14 @@ fun WonderlandApp(
                     custName?.let { "Customer: $it" },
                     "Priority: ${task.priority.displayLabel}"
                 ).joinToString(" | ")
-                viewModel.saveTasksForDates(task, targetDates, pushCalId, bldgName, extraDetails)
+                viewModel.saveTasksForDates(
+                    template = task,
+                    dates = targetDates,
+                    pushToCalendarId = pushCalId,
+                    buildingName = bldgName,
+                    extraDetails = extraDetails,
+                    sourceNote = assigningSourceNote
+                )
             },
             onDelete = viewModel::deleteTask,
             onDeleteMatching = { target ->

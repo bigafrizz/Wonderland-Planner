@@ -28,7 +28,8 @@ object AutoBackupFileHelper {
             snapshot.contacts.isNotEmpty() ||
             snapshot.tasks.isNotEmpty() ||
             snapshot.shifts.isNotEmpty() ||
-            snapshot.compTimeEntries.isNotEmpty()
+            snapshot.compTimeEntries.isNotEmpty() ||
+            snapshot.noteTodos.isNotEmpty()
     }
 
     fun writeAtomicJson(targetFile: File, json: String): Boolean {
@@ -143,7 +144,8 @@ class AutoBackupStore(
                 contacts = db.contactDao().getAllContactsOnce(),
                 tasks = db.taskDao().getAllTasksOnce(),
                 shifts = db.shiftScheduleDao().getAllShiftsOnce(),
-                compTimeEntries = db.compTimeDao().getAllEntriesOnce()
+                compTimeEntries = db.compTimeDao().getAllEntriesOnce(),
+                noteTodos = db.noteTodoDao().getAllNotesOnce()
             )
             val saved = AutoBackupFileHelper.writeSnapshotToFiles(
                 snapshot = snapshot,
@@ -169,7 +171,8 @@ class AutoBackupStore(
                     db.contactDao().count() == 0 &&
                     db.taskDao().count() == 0 &&
                     db.shiftScheduleDao().count() == 0 &&
-                    db.compTimeDao().count() == 0
+                    db.compTimeDao().count() == 0 &&
+                    db.noteTodoDao().count() == 0
 
                 if (!isEmpty || userExplicitlyCleared) return@withLock null
 

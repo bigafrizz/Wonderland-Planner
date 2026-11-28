@@ -7,6 +7,7 @@ import com.wonderland.taschasplanner.data.local.CompTimeEntryEntity
 import com.wonderland.taschasplanner.data.local.CompTimeEntryType
 import com.wonderland.taschasplanner.data.local.ContactEntity
 import com.wonderland.taschasplanner.data.local.ContactType
+import com.wonderland.taschasplanner.data.local.NoteTodoEntity
 import com.wonderland.taschasplanner.data.local.RecurrenceRule
 import com.wonderland.taschasplanner.data.local.ShiftScheduleEntity
 import com.wonderland.taschasplanner.data.local.ShiftStatus
@@ -18,13 +19,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class WonderlandBackupSnapshot(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val exportedAtMillis: Long = System.currentTimeMillis(),
     val buildings: List<BuildingEntity>,
     val contacts: List<ContactEntity>,
     val tasks: List<TaskEntity>,
     val shifts: List<ShiftScheduleEntity>,
-    val compTimeEntries: List<CompTimeEntryEntity> = emptyList()
+    val compTimeEntries: List<CompTimeEntryEntity> = emptyList(),
+    val noteTodos: List<NoteTodoEntity> = emptyList()
 )
 
 object WonderlandBackupCodec {
@@ -112,6 +114,22 @@ object WonderlandBackupCodec {
                         put("breakMinutes", c.breakMinutes)
                         put("usedCompHours", c.usedCompHours)
                         put("notes", c.notes)
+                    })
+                }
+            })
+            put("noteTodos", JSONArray().apply {
+                snapshot.noteTodos.forEach { n ->
+                    put(JSONObject().apply {
+                        put("id", n.id)
+                        put("header", n.header)
+                        put("body", n.body)
+                        put("createdAtMillis", n.createdAtMillis)
+                        put("updatedAtMillis", n.updatedAtMillis)
+                        put("isCompleted", n.isCompleted)
+                        if (n.completedAtMillis != null) put("completedAtMillis", n.completedAtMillis)
+                        put("isPinned", n.isPinned)
+                        put("accentColorHex", n.accentColorHex)
+                        if (n.linkedTaskId != null) put("linkedTaskId", n.linkedTaskId)
                     })
                 }
             })
@@ -211,14 +229,33 @@ object WonderlandBackupCodec {
             )
         }
 
+        val notesArr = root.optJSONArray("noteTodos") ?: JSONArray()
+        val noteTodos = (0 until notesArr.length()).map { idx ->
+            val o = notesArr.getJSONObject(idx)
+            val created = o.optLong("createdAtMillis", System.currentTimeMillis())
+            NoteTodoEntity(
+                id = o.getLong("id"),
+                header = o.optString("header", ""),
+                body = o.optString("body", ""),
+                createdAtMillis = created,
+                updatedAtMillis = o.optLong("updatedAtMillis", created),
+                isCompleted = o.optBoolean("isCompleted", false),
+                completedAtMillis = if (o.has("completedAtMillis") && !o.isNull("completedAtMillis")) o.getLong("completedAtMillis") else null,
+                isPinned = o.optBoolean("isPinned", false),
+                accentColorHex = o.optLong("accentColorHex", 0xFF6A1B9AL),
+                linkedTaskId = if (o.has("linkedTaskId") && !o.isNull("linkedTaskId")) o.getLong("linkedTaskId") else null
+            )
+        }
+
         return WonderlandBackupSnapshot(
-            schemaVersion = root.optInt("schemaVersion", 3),
+            schemaVersion = root.optInt("schemaVersion", 4),
             exportedAtMillis = root.optLong("exportedAtMillis", System.currentTimeMillis()),
             buildings = buildings,
             contacts = contacts,
             tasks = tasks,
             shifts = shifts,
-            compTimeEntries = compEntries
+            compTimeEntries = compEntries,
+            noteTodos = noteTodos
         )
     }
 }
@@ -230,7 +267,8 @@ class WonderlandBackupManager(private val db: WonderlandDatabase) {
             contacts = db.contactDao().getAllContactsOnce(),
             tasks = db.taskDao().getAllTasksOnce(),
             shifts = db.shiftScheduleDao().getAllShiftsOnce(),
-            compTimeEntries = db.compTimeDao().getAllEntriesOnce()
+            compTimeEntries = db.compTimeDao().getAllEntriesOnce(),
+            noteTodos = db.noteTodoDao().getAllNotesOnce()
         )
         return WonderlandBackupCodec.encode(snapshot)
     }
@@ -238,6 +276,7 @@ class WonderlandBackupManager(private val db: WonderlandDatabase) {
     suspend fun restoreFromJson(jsonString: String): WonderlandBackupSnapshot {
         val snapshot = WonderlandBackupCodec.decode(jsonString)
         db.withTransaction {
+            db.noteTodoDao().deleteAll()
             db.compTimeDao().deleteAll()
             db.shiftScheduleDao().deleteAll()
             db.taskDao().deleteAll()
@@ -249,6 +288,7 @@ class WonderlandBackupManager(private val db: WonderlandDatabase) {
             snapshot.tasks.forEach { db.taskDao().insert(it) }
             snapshot.shifts.forEach { db.shiftScheduleDao().insert(it) }
             snapshot.compTimeEntries.forEach { db.compTimeDao().insert(it) }
+            snapshot.noteTodos.forEach { db.noteTodoDao().insert(it) }
         }
         return snapshot
     }

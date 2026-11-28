@@ -166,3 +166,27 @@ interface CompTimeDao {
     @Query("DELETE FROM comp_time_entries")
     suspend fun deleteAll()
 }
+
+@Dao
+interface NoteTodoDao {
+    @Query("SELECT * FROM note_todos ORDER BY isCompleted ASC, isPinned DESC, updatedAtMillis DESC, id DESC")
+    fun observeAllNotes(): Flow<List<NoteTodoEntity>>
+
+    @Query("SELECT * FROM note_todos ORDER BY id ASC")
+    suspend fun getAllNotesOnce(): List<NoteTodoEntity>
+
+    @Query("SELECT COUNT(*) FROM note_todos")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(note: NoteTodoEntity): Long
+
+    @Update
+    suspend fun update(note: NoteTodoEntity)
+
+    @Delete
+    suspend fun delete(note: NoteTodoEntity)
+
+    @Query("DELETE FROM note_todos")
+    suspend fun deleteAll()
+}
